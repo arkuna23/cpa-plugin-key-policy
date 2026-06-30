@@ -17,6 +17,14 @@ export interface UsageSummary {
   weekly_limit_usd: number;
   daily_reset_at?: string;
   weekly_reset_at?: string;
+  // Cache reporting (omitted when zero). Hit-rate is derived client-side as
+  // cache_read_tokens / (cache_read_tokens + input_tokens).
+  daily_cache_cost_usd?: number;
+  weekly_cache_cost_usd?: number;
+  daily_cache_read_tokens?: number;
+  weekly_cache_read_tokens?: number;
+  daily_input_tokens?: number;
+  weekly_input_tokens?: number;
 }
 
 export interface KeyPublic {

@@ -59,10 +59,30 @@ type UsageState struct {
 	ByAlias map[string]UsageWindow `json:"by_alias,omitempty"`
 }
 
-// UsageWindow tracks a dollar total bound to a window-start timestamp.
+// UsageWindow tracks a dollar total bound to a window-start timestamp, plus
+// cache-specific counters for reporting (not used for limit enforcement).
+//
+// Cache fields are reported alongside the daily/weekly usage so the UI can show
+// cache spend and hit-rate without re-deriving it. They accumulate only cache
+// HITS — cache-creation (write) tokens are intentionally excluded, since their
+// pricing and meaning differ across providers and they are not "reads".
+//
+//   - CacheReadTokens: cache-hit input tokens billed in this window.
+//   - CacheCostUSD:    the dollar portion billed at the cache-read price
+//                      (only when a cache price was explicitly configured; 0
+//                      when cache hits were folded into the input-price line).
+//   - InputTokens:     non-cache input tokens billed in this window, i.e. the
+//                      prompt tokens charged at the regular input price. For
+//                      subset providers this is InputTokens - cacheRead; for
+//                      additive providers it is InputTokens + cacheCreation.
+//                      Used as the denominator of hit-rate = cacheRead /
+//                      (cacheRead + InputTokens).
 type UsageWindow struct {
-	TotalUSD    float64   `json:"total_usd"`
-	WindowStart time.Time `json:"window_start,omitempty"`
+	TotalUSD        float64   `json:"total_usd"`
+	WindowStart     time.Time `json:"window_start,omitempty"`
+	CacheReadTokens int64     `json:"cache_read_tokens,omitempty"`
+	CacheCostUSD    float64   `json:"cache_cost_usd,omitempty"`
+	InputTokens     int64     `json:"input_tokens,omitempty"`
 }
 
 type State struct {

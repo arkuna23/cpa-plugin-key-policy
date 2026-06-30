@@ -98,6 +98,8 @@
   "usage": {
     "today": "Today",
     "thisWeek": "This week",
-    "unlimited": "unlimited"
+    "unlimited": "unlimited",
+    "cache": "Cache",
+    "hitRate": "{{rate}}% hit"
   }
 }

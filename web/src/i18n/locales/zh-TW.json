@@ -98,6 +98,8 @@
   "usage": {
     "today": "今日",
     "thisWeek": "本週",
-    "unlimited": "不限"
+    "unlimited": "不限",
+    "cache": "快取",
+    "hitRate": "命中 {{rate}}%"
   }
 }

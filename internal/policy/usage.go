@@ -112,8 +112,17 @@ func sameDay(a, b time.Time) bool {
 }
 
 // RecordCost adds a dollar amount for a key+alias to the daily, weekly, and
-// per-alias buckets, advancing windows as needed.
-func (l *usageLedger) RecordCost(id, alias string, amount float64) {
+// per-alias buckets, advancing windows as needed. It also accumulates the
+// cache-specific counters (cache-read tokens, cache spend, non-cache input
+// tokens) used for the cache hit-rate / spend report — these do NOT feed limit
+// enforcement, only the Summary the UI reads.
+//
+// amount is the total dollar bill for the record; cacheCost is the portion of
+// that bill attributable to cache-hit input tokens priced at the cache price
+// (0 when no cache price was configured); cacheReadTokens is the cache-hit
+// count for the record; inputTokens is the non-cache input-token count charged
+// at the regular input price (the denominator partner for hit-rate).
+func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, cacheReadTokens, inputTokens int64) {
 	if amount <= 0 || id == "" {
 		return
 	}
@@ -125,21 +134,45 @@ func (l *usageLedger) RecordCost(id, alias string, amount float64) {
 	l.ensureWeeklyWindowLocked(st, now)
 	st.Daily.TotalUSD += amount
 	st.Weekly.TotalUSD += amount
+	if cacheReadTokens > 0 {
+		st.Daily.CacheReadTokens += cacheReadTokens
+		st.Weekly.CacheReadTokens += cacheReadTokens
+	}
+	if cacheCost > 0 {
+		st.Daily.CacheCostUSD += cacheCost
+		st.Weekly.CacheCostUSD += cacheCost
+	}
+	if inputTokens > 0 {
+		st.Daily.InputTokens += inputTokens
+		st.Weekly.InputTokens += inputTokens
+	}
 
 	aliasW := st.ByAlias[alias]
 	l.ensureAliasWindowLocked(&aliasW, true, now)
 	aliasW.TotalUSD += amount
+	aliasW.CacheReadTokens += cacheReadTokens
+	aliasW.CacheCostUSD += cacheCost
+	aliasW.InputTokens += inputTokens
 	st.ByAlias[alias] = aliasW
 }
 
-// UsageSummary is what the keys-list API reports for a key.
+// UsageSummary is what the keys-list API reports for a key. The cache fields are
+// reported for both the daily and weekly windows so the UI can show today's and
+// the rolling-week's cache spend / hit-rate. CacheHitRate is not serialized
+// here; the UI derives it as cacheRead / (cacheRead + input).
 type UsageSummary struct {
-	DailyUSD      float64   `json:"daily_usd"`
-	WeeklyUSD     float64   `json:"weekly_usd"`
-	DailyLimitUSD float64   `json:"daily_limit_usd"`
-	WeeklyLimitUSD float64  `json:"weekly_limit_usd"`
-	DailyResetAt  time.Time `json:"daily_reset_at,omitempty"`
-	WeeklyResetAt time.Time `json:"weekly_reset_at,omitempty"`
+	DailyUSD              float64   `json:"daily_usd"`
+	WeeklyUSD             float64   `json:"weekly_usd"`
+	DailyLimitUSD         float64   `json:"daily_limit_usd"`
+	WeeklyLimitUSD        float64   `json:"weekly_limit_usd"`
+	DailyResetAt          time.Time `json:"daily_reset_at,omitempty"`
+	WeeklyResetAt         time.Time `json:"weekly_reset_at,omitempty"`
+	DailyCacheCostUSD     float64   `json:"daily_cache_cost_usd,omitempty"`
+	WeeklyCacheCostUSD    float64   `json:"weekly_cache_cost_usd,omitempty"`
+	DailyCacheReadTokens  int64     `json:"daily_cache_read_tokens,omitempty"`
+	WeeklyCacheReadTokens int64     `json:"weekly_cache_read_tokens,omitempty"`
+	DailyInputTokens      int64     `json:"daily_input_tokens,omitempty"`
+	WeeklyInputTokens     int64     `json:"weekly_input_tokens,omitempty"`
 }
 
 // Summary returns the current usage + limits for a key. Limits come from the
@@ -168,6 +201,12 @@ func (l *usageLedger) Summary(key KeyConfig) UsageSummary {
 	l.ensureWeeklyWindowLocked(&ensureSt, now)
 	summary.DailyUSD = ensureSt.Daily.TotalUSD
 	summary.WeeklyUSD = ensureSt.Weekly.TotalUSD
+	summary.DailyCacheCostUSD = ensureSt.Daily.CacheCostUSD
+	summary.WeeklyCacheCostUSD = ensureSt.Weekly.CacheCostUSD
+	summary.DailyCacheReadTokens = ensureSt.Daily.CacheReadTokens
+	summary.WeeklyCacheReadTokens = ensureSt.Weekly.CacheReadTokens
+	summary.DailyInputTokens = ensureSt.Daily.InputTokens
+	summary.WeeklyInputTokens = ensureSt.Weekly.InputTokens
 	if !ensureSt.Weekly.WindowStart.IsZero() {
 		summary.WeeklyResetAt = ensureSt.Weekly.WindowStart.Add(weekWindow)
 	}

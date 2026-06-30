@@ -222,7 +222,12 @@ func (s *Store) RecordResponseCost(headers http.Header, query map[string][]strin
 	inputPerMillion, outputPerMillion, _, priced := key.PriceForAlias(alias)
 	cost := ComputeCost(inputPerMillion, outputPerMillion, priced, usage)
 	if cost > 0 && s.usage != nil {
-		s.usage.RecordCost(key.ID, alias, cost)
+		// The response-body path sees only prompt/completion counts (no cache
+		// breakdown), so cache counters stay 0 here; cache-aware accounting
+		// happens in RecordUsage via ComputeCacheCostBreakdown. We still record
+		// input tokens for hit-rate denominator parity (treat all prompt tokens
+		// as non-cache input on this path, since we can't tell otherwise).
+		s.usage.RecordCost(key.ID, alias, cost, 0, 0, int64(usage.PromptTokens))
 	}
 	return cost
 }
@@ -284,9 +289,27 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, detail UsageDetail)
 		provider = rule.Provider
 	}
 	inputPerMillion, outputPerMillion, cacheReadPerMillion, priced := key.PriceForAlias(resolved)
-	cost := ComputeCacheCost(provider, inputPerMillion, outputPerMillion, cacheReadPerMillion, priced, detail)
+	cost, cacheCost, cacheReadTokens := ComputeCacheCostBreakdown(provider, inputPerMillion, outputPerMillion, cacheReadPerMillion, priced, detail)
+	// Non-cache input tokens billed at the input price — the denominator partner
+	// for hit-rate = cacheRead / (cacheRead + input). Must mirror the biller's
+	// internal split so the reported rate matches the actual pricing.
+	var nonCacheInput int64
+	if priced && (detail.InputTokens > 0 || detail.OutputTokens > 0) {
+		if isCacheAdditiveProvider(provider) {
+			nonCacheInput = detail.InputTokens + detail.CacheCreationTokens
+		} else {
+			cr := detail.CacheReadTokens
+			if cr == 0 {
+				cr = detail.CachedTokens
+			}
+			if cr > detail.InputTokens {
+				cr = detail.InputTokens
+			}
+			nonCacheInput = detail.InputTokens - cr
+		}
+	}
 	if cost > 0 && s.usage != nil {
-		s.usage.RecordCost(key.ID, resolved, cost)
+		s.usage.RecordCost(key.ID, resolved, cost, cacheCost, cacheReadTokens, nonCacheInput)
 	}
 	return cost
 }

@@ -176,7 +176,66 @@ func TestComputeCacheCostUnpricedZero(t *testing.T) {
 	}
 }
 
-// TestRecordUsageBillsFromParsedTokens is the streaming-billing regression at
+// TestComputeCacheCostBreakdown verifies the cache-spend / cache-hit breakdown
+// returned alongside the total, used by the ledger for hit-rate + cache spend.
+// Subset provider, explicit cache price: 1M input (incl 200K cached) + 500K
+// output @ $3/$15/$0.30. Total 9.96 (as above). cacheCost = 200K×0.30/1M = 0.06.
+// cacheReadTokens = 200K. nonCache input billed at input price = 800K.
+func TestComputeCacheCostBreakdown(t *testing.T) {
+	detail := UsageDetail{InputTokens: 1_000_000, OutputTokens: 500_000, CachedTokens: 200_000}
+	total, cacheCost, cacheRead := ComputeCacheCostBreakdown("openai", 3, 15, 0.30, true, detail)
+	if !nearly(total, 9.96) {
+		t.Fatalf("total = %v, want 9.96", total)
+	}
+	if !nearly(cacheCost, 0.06) {
+		t.Fatalf("cacheCost = %v, want 0.06", cacheCost)
+	}
+	if cacheRead != 200_000 {
+		t.Fatalf("cacheRead = %d, want 200000", cacheRead)
+	}
+}
+
+// TestComputeCacheCostBreakdownNoCachePrice: when no cache price is configured,
+// cache hits fold into the input-price line. cacheCost must be 0 (not separably
+// priced) even though cacheRead is still reported for hit-rate accounting.
+func TestComputeCacheCostBreakdownNoCachePrice(t *testing.T) {
+	detail := UsageDetail{InputTokens: 1_000_000, OutputTokens: 500_000, CachedTokens: 200_000}
+	total, cacheCost, cacheRead := ComputeCacheCostBreakdown("openai", 3, 15, 0, true, detail)
+	if !nearly(total, 10.5) {
+		t.Fatalf("total = %v, want 10.5", total)
+	}
+	if cacheCost != 0 {
+		t.Fatalf("cacheCost = %v, want 0 (no separable cache spend without a cache price)", cacheCost)
+	}
+	if cacheRead != 200_000 {
+		t.Fatalf("cacheRead = %d, want 200000 (still reported for hit-rate)", cacheRead)
+	}
+}
+
+// TestComputeCacheCostBreakdownAdditive: Claude — cache reads outside input.
+// 800K input + 200K cacheRead + 100K cacheCreation + 500K output @ $3/$15/$0.30.
+// Total 10.26 (as above). cacheCost = 200K×0.30/1M = 0.06. cacheRead = 200K.
+// cacheCreation tokens are NOT counted as cacheRead (they are writes).
+func TestComputeCacheCostBreakdownAdditive(t *testing.T) {
+	detail := UsageDetail{
+		InputTokens:         800_000,
+		OutputTokens:        500_000,
+		CacheReadTokens:     200_000,
+		CacheCreationTokens: 100_000,
+	}
+	total, cacheCost, cacheRead := ComputeCacheCostBreakdown("claude", 3, 15, 0.30, true, detail)
+	if !nearly(total, 10.26) {
+		t.Fatalf("total = %v, want 10.26", total)
+	}
+	if !nearly(cacheCost, 0.06) {
+		t.Fatalf("cacheCost = %v, want 0.06", cacheCost)
+	}
+	if cacheRead != 200_000 {
+		t.Fatalf("cacheRead = %d, want 200000 (creation excluded)", cacheRead)
+	}
+}
+
+
 // the policy layer: RecordUsage bills from already-parsed token counts (as
 // delivered by usage.handle), with no response body to parse. Previously only
 // RecordResponseCost existed, which required a parseable body — unreachable

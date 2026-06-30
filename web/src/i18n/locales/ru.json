@@ -98,6 +98,8 @@
   "usage": {
     "today": "Сегодня",
     "thisWeek": "На неделе",
-    "unlimited": "без лимита"
+    "unlimited": "без лимита",
+    "cache": "Кэш",
+    "hitRate": "{{rate}}% попаданий"
   }
 }
