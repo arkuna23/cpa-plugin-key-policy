@@ -443,7 +443,9 @@ func (a *App) publicKeyFromConfig(key policy.KeyConfig) publicKey {
 		Enabled:        key.Enabled,
 		KeyPreview:     key.KeyPreview,
 		RPM:            key.RPM,
-		Models:         append([]policy.ModelRule(nil), key.Models...),
+		// Ensure models always serializes as [] (never null). A nil slice would
+		// marshal to JSON null, which the UI accesses as .length and crashes on.
+		Models:         append([]policy.ModelRule{}, key.Models...),
 		DailyLimitUSD:  key.DailyLimitUSD,
 		WeeklyLimitUSD: key.WeeklyLimitUSD,
 		Usage:          a.store.UsageSummaryFor(key),

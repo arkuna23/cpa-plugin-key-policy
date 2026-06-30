@@ -151,7 +151,7 @@ export default function KeyList() {
                   <td>
                     <UsageCell usage={k.usage} />
                   </td>
-                  <td>{k.models.length}</td>
+                  <td>{(k.models ?? []).length}</td>
                   <td>
                     <div className="actions">
                       <Link to={`/keys/${encodeURIComponent(k.id)}/edit`}>
