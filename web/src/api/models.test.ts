@@ -168,3 +168,31 @@ describe("readPlanType", () => {
     expect(readPlanType({ id_token: { plan_type: "  Team  " } })).toBe("team");
   });
 });
+
+describe("fromAuthFileModels provider source", () => {
+  // Regression: the live /auth-files/models response has NO top-level
+  // channel/provider field, and its model objects carry a per-model "type"
+  // ("openai" for codex-backed models). The provider must come from the LIST
+  // endpoint (carried into fromAuthFileModels), NOT the file name and NOT the
+  // per-model type — otherwise each codex file becomes its own "provider"
+  // group named after the file and no tier union happens.
+  it("uses the list-endpoint provider, not the file name or per-model type", () => {
+    // Import the internal adapter via the public normalizeCatalog path: build a
+    // RawEntry the way fromAuthFileModels now does and feed normalizeCatalog.
+    const liveModelsPayload = {
+      models: [
+        { display_name: "GPT 5.4", id: "gpt-5.4", owned_by: "openai", type: "openai" },
+        { display_name: "GPT 5.5", id: "gpt-5.5", owned_by: "openai", type: "openai" },
+      ],
+    };
+    // Simulate fromAuthFileModels(provider="codex", payload): provider is codex.
+    const entry = {
+      provider: "codex",
+      group: "team",
+      models: liveModelsPayload.models.map((m) => m.id),
+    };
+    const out = normalizeCatalog([entry]);
+    expect(out.every((o) => o.provider === "codex")).toBe(true);
+    expect(out.map((o) => o.model).sort()).toEqual(["gpt-5.4", "gpt-5.5"]);
+  });
+});

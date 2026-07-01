@@ -133,6 +133,13 @@ function fromChannelKey(channel: string, payload: unknown): RawEntry[] {
 // a fallback. Everything else is ignored.
 interface AuthFileMeta {
   name: string;
+  // provider as reported by the auth-files LIST endpoint (e.g. "codex",
+  // "antigravity", "claude"). The per-file /auth-files/models endpoint does NOT
+  // echo a provider/channel — its models objects carry a per-model "type"
+  // ("openai" for codex-backed models) which is NOT the auth provider. We must
+  // carry the list-endpoint provider here so each file's models land under the
+  // right provider group; otherwise the file name leaks in as the "provider".
+  provider: string;
   planType: string;
 }
 
@@ -145,8 +152,9 @@ function fromAuthFiles(payload: unknown): AuthFileMeta[] {
     const o = (item ?? {}) as Record<string, unknown>;
     const name = ((o["name"] as string) ?? (o["id"] as string) ?? "").trim();
     if (!name) continue;
+    const provider = ((o["provider"] as string) ?? (o["type"] as string) ?? "").trim().toLowerCase();
     const planType = readPlanType(o);
-    out.push({ name, planType });
+    out.push({ name, provider, planType });
   }
   return out;
 }
@@ -187,12 +195,14 @@ export function readPlanType(entry: Record<string, unknown>): string {
   return "";
 }
 
-function fromAuthFileModels(name: string, payload: unknown): RawEntry[] {
+// Build a RawEntry from a per-file /auth-files/models response. The provider
+// comes from the LIST endpoint (carried in `provider`), NOT the models
+// payload — the models objects report a per-model "type" ("openai" for codex
+// backed models) which is the upstream format, not the auth provider, and the
+// response itself has no top-level channel/provider field.
+function fromAuthFileModels(provider: string, payload: unknown): RawEntry[] {
   const root = payload as Record<string, unknown> | null;
   const models = root?.["models"] ?? root?.["available_models"];
-  const provider =
-    ((root?.["channel"] as string) ?? (root?.["provider"] as string) ?? "").trim() ||
-    name;
   return [{ provider, models }];
 }
 
@@ -253,7 +263,7 @@ export async function fetchCatalog(): Promise<CatalogModel[]> {
     );
     for (const res of perFile) {
       if (!res) continue;
-      const fileEntries = fromAuthFileModels(res.meta.name, res.data);
+      const fileEntries = fromAuthFileModels(res.meta.provider, res.data);
       for (const e of fileEntries) {
         const provider = (e.provider ?? "").toLowerCase();
         if (TIERED_PROVIDERS.has(provider)) {
