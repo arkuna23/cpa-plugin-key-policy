@@ -56,7 +56,15 @@ export default function ModelPicker({ initial, onChange }: Props) {
       setLoading(true);
       setError("");
       try {
-        const cat = await fetchCatalog();
+        // Pass the providers already bound to this key (edit-mode prefill) so
+        // fetchCatalog keeps those channels visible even when their credential
+        // has since been removed — the user can still see and uncheck their
+        // rows. New-key mode has no initial rules, so only configured channels
+        // appear.
+        const selectedProviders = new Set(
+          (initial ?? []).map((r) => r.provider.toLowerCase()),
+        );
+        const cat = await fetchCatalog(selectedProviders);
         if (!alive) return;
         setGroups(groupByCatalog(cat));
       } catch (e) {

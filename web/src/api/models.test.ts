@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { normalizeCatalog, groupByCatalog, readPlanType } from "./models";
+import {
+  normalizeCatalog,
+  groupByCatalog,
+  readPlanType,
+  filterByConfigured,
+} from "./models";
 
 describe("normalizeCatalog", () => {
   it("flattens provider + string models", () => {
@@ -194,5 +199,117 @@ describe("fromAuthFileModels provider source", () => {
     const out = normalizeCatalog([entry]);
     expect(out.every((o) => o.provider === "codex")).toBe(true);
     expect(out.map((o) => o.model).sort()).toEqual(["gpt-5.4", "gpt-5.5"]);
+  });
+});
+
+describe("filterByConfigured", () => {
+  // Bare static-definition entries (group undefined) for non-tiered providers.
+  const bare = (provider: string, models: string[]) =>
+    ({ provider, models });
+
+  it("keeps bare static entries for configured providers", () => {
+    const entries = [
+      bare("claude", ["claude-sonnet-4"]),
+      bare("aistudio", ["gemini-2.5"]),
+    ];
+    const out = filterByConfigured(
+      entries,
+      new Set(["claude"]),
+      new Set(),
+      new Set(),
+    );
+    expect(out.map((e) => e.provider)).toEqual(["claude"]);
+  });
+
+  it("hides bare static entries for unconfigured providers with nothing selected", () => {
+    // aistudio has no auth file and nothing selected → hidden. claude is
+    // configured → kept. gemini is unconfigured but a model is selected → kept.
+    const entries = [
+      bare("claude", ["claude-sonnet-4"]),
+      bare("aistudio", ["gemini-2.5"]),
+      bare("gemini", ["gemini-pro"]),
+    ];
+    const out = filterByConfigured(
+      entries,
+      new Set(["claude"]),
+      new Set(["gemini"]),
+      new Set(),
+    );
+    expect(out.map((e) => e.provider).sort()).toEqual(["claude", "gemini"]);
+  });
+
+  it("keeps an unconfigured provider when one of its models is selected", () => {
+    // Regression guard for the edit-mode requirement: a key already authorizes
+    // a xai model, but the xai credential was removed. The row must stay
+    // visible so the user can uncheck it.
+    const entries = [bare("xai", ["grok-3"])];
+    const out = filterByConfigured(
+      entries,
+      new Set(),
+      new Set(["xai"]),
+      new Set(),
+    );
+    expect(out.map((e) => e.provider)).toEqual(["xai"]);
+  });
+
+  it("keeps auth-file-sourced (grouped) entries even when not in configured set", () => {
+    // Entries with a group come from the auth-files path and already imply a
+    // configured credential; filterByConfigured must not drop them via the
+    // configured/selected check.
+    const entries = [
+      { provider: "antigravity", group: "supported", models: ["gem-3"] },
+    ];
+    const out = filterByConfigured(entries, new Set(), new Set(), new Set());
+    expect(out).toHaveLength(1);
+    expect(out[0].provider).toBe("antigravity");
+  });
+
+  it("drops bare static codex entries when auth-files covered codex with tiers", () => {
+    // codex is tiered; when auth-files contributed tier subgroups, the bare
+    // static "codex" duplicate (no backing auth file) is dropped. The tiered
+    // subgroup entries (group set) are kept.
+    const entries = [
+      bare("codex", ["gpt-5"]),
+      { provider: "codex", group: "team", models: ["gpt-5"] },
+    ];
+    const out = filterByConfigured(
+      entries,
+      new Set(["codex"]),
+      new Set(),
+      new Set(["codex"]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].group).toBe("team");
+  });
+
+  it("keeps bare static codex entries when auth-files did NOT cover codex", () => {
+    // No codex auth file present (e.g. only an API key, or fully unconfigured).
+    // The bare static entry is the only source of codex models and must stay,
+    // gated only by the configured/selected check like any non-tiered provider.
+    const entries = [bare("codex", ["gpt-5"])];
+    const out = filterByConfigured(
+      entries,
+      new Set(["codex"]),
+      new Set(),
+      new Set(),
+    );
+    expect(out.map((e) => e.provider)).toEqual(["codex"]);
+  });
+
+  it("hides bare static codex entries when codex is neither configured nor selected", () => {
+    const entries = [bare("codex", ["gpt-5"])];
+    const out = filterByConfigured(entries, new Set(), new Set(), new Set());
+    expect(out).toEqual([]);
+  });
+
+  it("is case-insensitive on provider matching", () => {
+    const entries = [bare("Claude", ["claude-sonnet-4"])];
+    const out = filterByConfigured(
+      entries,
+      new Set(["claude"]),
+      new Set(),
+      new Set(),
+    );
+    expect(out.map((e) => e.provider)).toEqual(["Claude"]);
   });
 });

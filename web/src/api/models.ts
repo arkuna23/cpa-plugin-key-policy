@@ -29,6 +29,18 @@ const TIERED_PROVIDERS = new Set(["codex", "antigravity"]);
 // "supported"/"unknown" as the untiered bucket.
 const SUPPORTED_GROUP = "supported";
 
+// Map the per-channel API-key management endpoints to the provider identity
+// used in the catalog. The endpoint returns its key list under a top-level
+// key named like the channel (e.g. { "gemini-api-key": [...] }); the provider
+// group in the picker is the bare name ("gemini"). A non-empty list means the
+// user has configured at least one API-key credential for that provider.
+const API_KEY_CHANNELS: Record<string, string> = {
+  "gemini-api-key": "gemini",
+  "claude-api-key": "claude",
+  "codex-api-key": "codex",
+  "vertex-api-key": "vertex",
+};
+
 interface RawEntry {
   provider?: string;
   models?: unknown;
@@ -52,7 +64,7 @@ export function normalizeCatalog(entries: RawEntry[]): CatalogModel[] {
     for (const m of toStrings(e.models)) {
       const model = m.trim();
       if (!model) continue;
-      const key = provider + "" + group + "" + model.toLowerCase();
+      const key = provider + "" + group + "" + model.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       const row: CatalogModel = { provider, model };
@@ -115,15 +127,6 @@ function fromOpenAICompat(payload: unknown): RawEntry[] {
       "openai-compat";
     return { provider, models: o?.["models"] };
   });
-}
-
-function fromChannelKey(channel: string, payload: unknown): RawEntry[] {
-  // CPA per-channel endpoints vary; try common shapes.
-  const o = payload as Record<string, unknown> | null;
-  if (!o) return [];
-  // Could be { models: [...] } or an array directly under a key.
-  const models = o["models"] ?? o["keys"];
-  return [{ provider: channel, models }];
 }
 
 // One auth-file row from /v0/management/auth-files. We only need the file name
@@ -212,20 +215,85 @@ function fromModelDefinitions(channel: string, payload: unknown): RawEntry[] {
   return [{ provider: channel, models }];
 }
 
+// Is the *-api-key list at `endpoint` non-empty? CPA's Get<Key> handlers return
+// 200 with a top-level "<channel>-api-key": [...] array (nil/empty when none
+// configured), NOT a 404, so we must inspect the body to know whether a
+// credential is actually present. Returns the mapped provider name when at
+// least one key exists, else "".
+function apiKeyProviderIfConfigured(endpoint: string, payload: unknown): string {
+  const provider = API_KEY_CHANNELS[endpoint];
+  if (!provider) return "";
+  const root = payload as Record<string, unknown> | null;
+  if (!root) return "";
+  const list = root[endpoint];
+  return Array.isArray(list) && list.length > 0 ? provider : "";
+}
+
+// Filter the collected raw entries down to those that should be visible in the
+// picker. Bare (group-less) static entries — from model-definitions/<channel> —
+// are dropped when EITHER:
+//   1. They're a tiered provider (codex, antigravity) that the auth-files pass
+//      already contributed tier subgroups for, so the bare row is a duplicate
+//      with no backing auth file (the "codex · team" subgroup is the real one).
+//   2. Their provider is neither configured (no credential) nor has a
+//      currently-selected model — i.e. an unconfigured channel that should be
+//      hidden from the picker.
+// Entries carrying a `group` are auth-file sourced and already imply a
+// configured credential, so they're kept unconditionally.
+// Exported for unit testing.
+export function filterByConfigured(
+  entries: RawEntry[],
+  configured: Set<string>,
+  selected: Set<string>,
+  tieredFromAuth: Set<string>,
+): RawEntry[] {
+  const out: RawEntry[] = [];
+  for (const e of entries) {
+    const provider = (e.provider ?? "").toLowerCase();
+    if (e.group === undefined) {
+      // Bare static entry (from model-definitions/<channel>).
+      // Drop when it's a tiered provider already covered by auth-files (the
+      // tier subgroups are the real, backed rows; this bare one is a dup with
+      // no auth file behind it)...
+      const dupOfTiered =
+        TIERED_PROVIDERS.has(provider) && tieredFromAuth.has(provider);
+      // ...or when the provider is neither configured nor has a selected model
+      // (unconfigured channel should be hidden, but an edited key's rows stay
+      // visible so the user can uncheck them).
+      const unconfigured =
+        !configured.has(provider) && !selected.has(provider);
+      if (dupOfTiered || unconfigured) continue;
+    }
+    out.push(e);
+  }
+  return out;
+}
+
 // Fetch the composed catalog. Failures of individual sources are swallowed so
 // that one unavailable endpoint doesn't blank the whole picker. A 401/403 here
 // is real (bad key) and surfaces through the shared client as a forced
 // re-login — that's intended; we don't mask auth failures.
-export async function fetchCatalog(): Promise<CatalogModel[]> {
+//
+// `selectedProviders` is the set of providers (lowercased) the caller already
+// has model rules for (edit-mode prefill). Providers in this set stay visible
+// even when unconfigured, so the user can see and uncheck their rows. New-key
+// mode passes nothing (empty set) and only configured channels appear.
+export async function fetchCatalog(
+  selectedProviders?: Set<string>,
+): Promise<CatalogModel[]> {
   const c = apiClient();
   const entries: RawEntry[] = [];
   // Tiered providers that the auth-files path contributed models for. Filled
-  // during the auth-files pass; read after static definitions load to suppress
-  // bare-group static entries for providers already covered with tier
-  // subgroups (otherwise the user sees both a bare "codex" group from static
-  // definitions and "codex · team" from auth files — a duplicate with no
-  // backing auth file behind the bare group).
+  // during the auth-files pass; read in filterByConfigured to suppress bare
+  // static entries for providers already covered with tier subgroups.
   const authFileTieredProviders = new Set<string>();
+  // Providers the user has actually configured a credential for (an OAuth auth
+  // file is present, or a non-empty *-api-key list). Bare static-definition
+  // entries for providers NOT in this set are hidden unless a model under them
+  // is already selected (see filterByConfigured).
+  const configuredProviders = new Set<string>();
+  const selected = new Set<string>();
+  for (const p of selectedProviders ?? []) selected.add(p.toLowerCase());
 
   const safe = async <T>(p: Promise<{ data: T }>, apply: (d: T) => void) => {
     try {
@@ -241,11 +309,16 @@ export async function fetchCatalog(): Promise<CatalogModel[]> {
     (d) => entries.push(...fromOpenAICompat(d)),
   );
 
-  for (const ch of ["gemini-api-key", "claude-api-key", "codex-api-key", "vertex-api-key"]) {
-    await safe(
-      c.get("/v0/management/" + ch),
-      (d) => entries.push(...fromChannelKey(ch, d)),
-    );
+  // Per-channel API-key endpoints. These responses carry their key list under a
+  // top-level "<channel>-api-key" array (NOT under "models"/"keys"), so
+  // fromChannelKey yields no models here — we use them solely to detect whether
+  // the user has configured an API-key credential, marking the mapped provider
+  // as configured when the list is non-empty.
+  for (const ch of Object.keys(API_KEY_CHANNELS)) {
+    await safe(c.get("/v0/management/" + ch), (d) => {
+      const provider = apiKeyProviderIfConfigured(ch, d);
+      if (provider) configuredProviders.add(provider);
+    });
   }
 
   // auth-files: fetch the file list (carrying each file's tier/plan identity)
@@ -257,6 +330,12 @@ export async function fetchCatalog(): Promise<CatalogModel[]> {
   // can't read join the "supported" untiered bucket (never a real tier).
   await safe(c.get("/v0/management/auth-files"), async (d) => {
     const metas = fromAuthFiles(d);
+    // Every auth file implies its provider is configured (an OAuth credential
+    // exists on disk/in-memory), regardless of tier — record that so the
+    // provider's static-definition entries aren't hidden by filterByConfigured.
+    for (const m of metas) {
+      if (m.provider) configuredProviders.add(m.provider);
+    }
     // Fetch per-file models in parallel (bounded) so a large auth dir doesn't
     // serialize into N round-trips. Failures of individual files are swallowed;
     // a file whose models we couldn't fetch simply contributes nothing.
@@ -272,10 +351,10 @@ export async function fetchCatalog(): Promise<CatalogModel[]> {
     // models for. When a tiered provider has real auth files, its models come
     // from here grouped by tier (codex·team / codex·free / codex·supported) —
     // and the static model-definitions entries for the SAME provider (which
-    // carry no group/tier) are dropped below so the user doesn't see a
-    // duplicate bare "codex" group of models that may have no backing auth
-    // file. A provider with NO auth files keeps its static definitions (e.g.
-    // api-key-only providers), since that's the only source of its models.
+    // carry no group/tier) are dropped in filterByConfigured so the user
+    // doesn't see a duplicate bare "codex" group of models that may have no
+    // backing auth file. A provider with NO auth files keeps its static
+    // definitions (e.g. api-key-only providers), since that's the only source.
     for (const res of perFile) {
       if (!res) continue;
       const fileEntries = fromAuthFileModels(res.meta.provider, res.data);
@@ -299,22 +378,13 @@ export async function fetchCatalog(): Promise<CatalogModel[]> {
     );
   }
 
-  // Suppress bare (group-less) static-definition entries for tiered providers
-  // that auth-files already covered with tier subgroups. Same model then
-  // appears only under its real tier(s), not duplicated as a bare "codex" row
-  // that has no backing auth file. Untiered providers keep all their entries.
-  const suppressed: RawEntry[] = [];
-  for (const e of entries) {
-    if (
-      e.group === undefined &&
-      TIERED_PROVIDERS.has((e.provider ?? "").toLowerCase()) &&
-      authFileTieredProviders.has((e.provider ?? "").toLowerCase())
-    ) {
-      continue;
-    }
-    suppressed.push(e);
-  }
-  return normalizeCatalog(suppressed);
+  const filtered = filterByConfigured(
+    entries,
+    configuredProviders,
+    selected,
+    authFileTieredProviders,
+  );
+  return normalizeCatalog(filtered);
 }
 
 // A picker group: a provider, optionally split by tier (codex free / team /
