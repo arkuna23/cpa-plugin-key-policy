@@ -279,7 +279,7 @@ func newCacheStore(t *testing.T, now time.Time, provider string) *Store {
 func TestCacheStatsAccumulatedAndHitRate(t *testing.T) {
 	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
 	store := newCacheStore(t, now, "openai")
-	cost := store.RecordUsage("cache-key", "fast", "m", UsageDetail{
+	cost := store.RecordUsage("cache-key", "fast", "m", false, UsageDetail{
 		InputTokens: 1_000_000, OutputTokens: 500_000, CachedTokens: 200_000,
 	})
 	if !nearly(cost, 9.96) {
@@ -315,12 +315,12 @@ func TestCacheStatsAccumulatedAndHitRate(t *testing.T) {
 func TestCacheStatsResetAtMidnight(t *testing.T) {
 	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
 	store := newCacheStore(t, now, "openai")
-	_ = store.RecordUsage("cache-key", "fast", "m", UsageDetail{
+	_ = store.RecordUsage("cache-key", "fast", "m", false, UsageDetail{
 		InputTokens: 1_000_000, OutputTokens: 500_000, CachedTokens: 200_000,
 	})
 	store.SetClock(func() time.Time { return now.Add(14 * time.Hour) }) // next UTC day
 	// A new day-2 record: 1M input (200K cached), no output.
-	_ = store.RecordUsage("cache-key", "fast", "m", UsageDetail{
+	_ = store.RecordUsage("cache-key", "fast", "m", false, UsageDetail{
 		InputTokens: 1_000_000, OutputTokens: 0, CachedTokens: 200_000,
 	})
 
@@ -341,7 +341,7 @@ func TestCacheStatsResetAtMidnight(t *testing.T) {
 func TestCacheStatsAdditiveExcludesCreation(t *testing.T) {
 	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
 	store := newCacheStore(t, now, "claude")
-	_ = store.RecordUsage("cache-key", "fast", "m", UsageDetail{
+	_ = store.RecordUsage("cache-key", "fast", "m", false, UsageDetail{
 		InputTokens:         800_000,
 		OutputTokens:        500_000,
 		CacheReadTokens:     200_000,
@@ -384,7 +384,7 @@ func TestCacheStatsPersistAcrossRestart(t *testing.T) {
 		return s
 	}
 	s1 := mk()
-	_ = s1.RecordUsage("cache-key", "fast", "m", UsageDetail{
+	_ = s1.RecordUsage("cache-key", "fast", "m", false, UsageDetail{
 		InputTokens: 1_000_000, OutputTokens: 500_000, CachedTokens: 200_000,
 	})
 	if err := s1.FlushUsage(); err != nil {
@@ -394,5 +394,132 @@ func TestCacheStatsPersistAcrossRestart(t *testing.T) {
 	got := s2.UsageSummaryFor(s2.Keys()[0])
 	if !nearly(got.DailyCacheCostUSD, 0.06) || got.DailyCacheReadTokens != 200_000 || got.DailyInputTokens != 800_000 {
 		t.Fatalf("cache stats after restart = %+v, want 0.06/200000/800000", got)
+	}
+}
+
+// newPerCallStore builds a store with one key whose alias is billed per-call at
+// perCallUSD, under a daily dollar limit, for per-call billing tests.
+func newPerCallStore(t *testing.T, perCallUSD, dailyLimit float64) *Store {
+	t.Helper()
+	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
+	store := NewStore()
+	store.SetClock(func() time.Time { return now })
+	if err := store.Configure(Config{
+		Enabled:   true,
+		StateFile: filepath.Join(t.TempDir(), "state.json"),
+		Keys: []KeyConfig{{
+			ID: "percall", Enabled: true, DailyLimitUSD: dailyLimit,
+			KeyHash: hashForUsageTest(t, "cpa_percall"),
+			Models: []ModelRule{{
+				Alias:       "fast",
+				Provider:    "codex",
+				TargetModel: "gpt-5-codex",
+				BillingMode: "per_call",
+				PerCallUSD:  perCallUSD,
+				// Token prices are dormant under per_call but kept to verify they
+				// are NOT used.
+				InputPricePerMillion:  999,
+				OutputPricePerMillion: 999,
+			}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+// TestPerCallBillsFixedUSD: each successful request charges PerCallUSD
+// regardless of token counts; token prices are ignored. Two $0.50 calls hit
+// the $1.00 daily limit, so the next Authenticate is rejected.
+func TestPerCallBillsFixedUSD(t *testing.T) {
+	store := newPerCallStore(t, 0.50, 1.00)
+	hdr := map[string][]string{"Authorization": {"Bearer cpa_percall"}}
+
+	// A "successful" usage record with huge token counts — per_call must charge
+	// the fixed $0.50, NOT the (dormant) token price.
+	cost := store.RecordUsage("percall", "fast", "gpt-5-codex", false, UsageDetail{
+		InputTokens: 1_000_000, OutputTokens: 1_000_000,
+	})
+	if !nearly(cost, 0.50) {
+		t.Fatalf("per_call cost = %v, want 0.50", cost)
+	}
+	d := store.Authenticate("POST", "/v1/chat/completions", hdr, nil, []byte(`{"model":"fast"}`))
+	if !d.Allowed {
+		t.Fatalf("first call should be allowed: %+v", d)
+	}
+	// Second $0.50 → total $1.00 == limit. Next Authenticate rejected.
+	_ = store.RecordUsage("percall", "fast", "gpt-5-codex", false, UsageDetail{})
+	d = store.Authenticate("POST", "/v1/chat/completions", hdr, nil, []byte(`{"model":"fast"}`))
+	if d.Allowed || !d.CostLimited || d.Reason != "daily_exceeded" {
+		t.Fatalf("after two per_call charges, next should be daily_exceeded: %+v", d)
+	}
+	// CallCount reflects two successful calls.
+	s := store.UsageSummaryFor(store.Keys()[0])
+	if s.DailyCallCount != 2 {
+		t.Fatalf("daily call count = %d, want 2", s.DailyCallCount)
+	}
+}
+
+// TestPerCallFailedNotBilled: a failed request charges nothing and does not
+// increment CallCount (per-call only applies to HTTP-200 outcomes).
+func TestPerCallFailedNotBilled(t *testing.T) {
+	store := newPerCallStore(t, 0.50, 1.00)
+	cost := store.RecordUsage("percall", "fast", "gpt-5-codex", true, UsageDetail{
+		InputTokens: 1_000_000, OutputTokens: 1_000_000,
+	})
+	if cost != 0 {
+		t.Fatalf("failed per_call cost = %v, want 0", cost)
+	}
+	s := store.UsageSummaryFor(store.Keys()[0])
+	if s.DailyCallCount != 0 || !nearly(s.DailyUSD, 0) {
+		t.Fatalf("failed call should not count: %+v", s)
+	}
+}
+
+// TestPerCallZeroStillCounts: PerCallUSD=0 is allowed (free calls). Cost is 0
+// but CallCount still increments, and the key never exceeds a dollar limit.
+func TestPerCallZeroStillCounts(t *testing.T) {
+	store := newPerCallStore(t, 0, 0.01)
+	for i := 0; i < 5; i++ {
+		cost := store.RecordUsage("percall", "fast", "gpt-5-codex", false, UsageDetail{})
+		if cost != 0 {
+			t.Fatalf("free per_call cost = %v, want 0", cost)
+		}
+	}
+	s := store.UsageSummaryFor(store.Keys()[0])
+	if s.DailyCallCount != 5 {
+		t.Fatalf("daily call count = %d, want 5", s.DailyCallCount)
+	}
+	// No dollar spend → never blocked even with a tiny limit.
+	hdr := map[string][]string{"Authorization": {"Bearer cpa_percall"}}
+	d := store.Authenticate("POST", "/v1/chat/completions", hdr, nil, []byte(`{"model":"fast"}`))
+	if !d.Allowed {
+		t.Fatalf("free per_call should never exceed dollar limit: %+v", d)
+	}
+}
+
+// TestCallCountIncrementedTokenMode: token-billed successful requests also
+// increment CallCount (the counter is mode-agnostic for successful requests).
+func TestCallCountIncrementedTokenMode(t *testing.T) {
+	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
+	store := NewStore()
+	store.SetClock(func() time.Time { return now })
+	if err := store.Configure(Config{
+		Enabled:   true,
+		StateFile: filepath.Join(t.TempDir(), "state.json"),
+		Keys: []KeyConfig{{
+			ID: "tok", Enabled: true,
+			KeyHash: hashForUsageTest(t, "cpa_tok"),
+			Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "m",
+				InputPricePerMillion: 1, OutputPricePerMillion: 1}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.RecordUsage("tok", "fast", "m", false, UsageDetail{InputTokens: 100_000, OutputTokens: 0})
+	_ = store.RecordUsage("tok", "fast", "m", false, UsageDetail{InputTokens: 0, OutputTokens: 100_000})
+	s := store.UsageSummaryFor(store.Keys()[0])
+	if s.DailyCallCount != 2 {
+		t.Fatalf("token-mode daily call count = %d, want 2", s.DailyCallCount)
 	}
 }

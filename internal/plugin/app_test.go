@@ -10,6 +10,16 @@ import (
 	"cpa-key-policy/internal/policy"
 )
 
+func nearly(a, b float64) bool {
+	if a < 0 {
+		a = -a
+	}
+	if b < 0 {
+		b = -b
+	}
+	return a < b+1e-9 && b < a+1e-9
+}
+
 func configureTestApp(t *testing.T) (*App, string) {
 	t.Helper()
 	app := NewApp()
@@ -525,5 +535,81 @@ keys:
 	d := app.Store().Authenticate("POST", "/v1/chat/completions", hdr, nil, []byte(`{"model":"sonnet"}`))
 	if d.Allowed || !d.CostLimited || d.Reason != "daily_exceeded" {
 		t.Fatalf("cache-billed usage should block at $1.05 > $1.00: %+v", d)
+	}
+}
+
+// TestUsageHandlePerCallBills verifies the full usage.handle path for a
+// per-call-billed alias: each successful record charges the fixed PerCallUSD
+// (ignoring token counts), and a Failed record charges nothing.
+func TestUsageHandlePerCallBills(t *testing.T) {
+	app := NewApp()
+	plain := "cpa_percall_app"
+	hash := hashForTest(t, plain)
+	yaml := []byte(`
+enabled: true
+state_file: "` + filepath.ToSlash(filepath.Join(t.TempDir(), "state.json")) + `"
+keys:
+  - id: percall
+    enabled: true
+    key_hash: "` + hash + `"
+    key_preview: "cpa_pe...app"
+    daily_limit_usd: 1.00
+    models:
+      - alias: fast
+        provider: codex
+        target_model: gpt-5-codex
+        billing_mode: per_call
+        per_call_usd: 0.50
+        input_price_per_million: 999
+        output_price_per_million: 999
+`)
+	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
+	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	hdr := http.Header{"Authorization": {"Bearer " + plain}}
+
+	// Successful record with huge token counts — must charge $0.50, not token price.
+	successReq, _ := json.Marshal(UsageHandleRequest{
+		APIKey: "percall",
+		Alias:  "fast",
+		Detail: UsageDetail{InputTokens: 10_000_000, OutputTokens: 10_000_000},
+	})
+	if _, err := app.HandleMethod(MethodUsageHandle, successReq); err != nil {
+		t.Fatal(err)
+	}
+	// Failed record — must charge nothing and not count.
+	failReq, _ := json.Marshal(UsageHandleRequest{
+		APIKey: "percall",
+		Alias:  "fast",
+		Failed: true,
+		Detail: UsageDetail{InputTokens: 10_000_000, OutputTokens: 10_000_000},
+	})
+	if _, err := app.HandleMethod(MethodUsageHandle, failReq); err != nil {
+		t.Fatal(err)
+	}
+	// A second successful record → total $1.00 == limit.
+	if _, err := app.HandleMethod(MethodUsageHandle, successReq); err != nil {
+		t.Fatal(err)
+	}
+
+	// Next auth rejected on daily limit. CallCount = 2 (failed didn't count).
+	d := app.Store().Authenticate("POST", "/v1/chat/completions", hdr, nil, []byte(`{"model":"fast"}`))
+	if d.Allowed || !d.CostLimited || d.Reason != "daily_exceeded" {
+		t.Fatalf("after two per_call charges, next should be daily_exceeded: %+v", d)
+	}
+	keys := app.Store().Keys()
+	var key policy.KeyConfig
+	for _, k := range keys {
+		if k.ID == "percall" {
+			key = k
+		}
+	}
+	s := app.Store().UsageSummaryFor(key)
+	if s.DailyCallCount != 2 {
+		t.Fatalf("daily call count = %d, want 2 (failed excluded)", s.DailyCallCount)
+	}
+	if !nearly(s.DailyUSD, 1.00) {
+		t.Fatalf("daily usd = %v, want 1.00", s.DailyUSD)
 	}
 }

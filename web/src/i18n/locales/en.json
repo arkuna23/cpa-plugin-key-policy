@@ -73,6 +73,13 @@
     "colAlias": "Alias",
     "colProvider": "Provider",
     "colGroup": "Tier",
+    "colBillingMode": "Billing",
+    "colBillingModeHint": "Toggle to bill a fixed USD per successful request instead of by token count. Token prices are retained but dormant; untoggle to reuse them.",
+    "billingTokens": "Per token",
+    "billingPerCall": "Per call",
+    "billingModeTitle": "Switch between per-token and per-call billing",
+    "colPerCall": "$ / call",
+    "perCallZeroWarn": "Per-call price is 0: calls are free (still counted). Fill in a price unless this is intentional.",
     "colInput": "Input $/M",
     "colOutput": "Output $/M",
     "colCacheRead": "Cache read $/M",
@@ -116,6 +123,7 @@
     "thisWeek": "This week",
     "unlimited": "unlimited",
     "cache": "Cache",
-    "hitRate": "{{rate}}% hit"
+    "hitRate": "{{rate}}% hit",
+    "calls": "calls (today / week)"
   }
 }

@@ -14,6 +14,15 @@ export interface ModelRule {
   input_price_per_million?: number;
   output_price_per_million?: number;
   cache_read_price_per_million?: number;
+  // billing_mode selects how this alias is billed per successful request:
+  //   - "tokens" (default): bill by token counts using the three prices above.
+  //   - "per_call": bill a fixed per_call_usd per successful request, ignoring
+  //     token counts. The token-price fields are preserved but dormant.
+  billing_mode?: "tokens" | "per_call";
+  // per_call_usd is the fixed USD charge per successful request when
+  // billing_mode === "per_call". 0 is allowed (free calls). Only meaningful
+  // under "per_call".
+  per_call_usd?: number;
 }
 
 export interface UsageSummary {
@@ -31,6 +40,10 @@ export interface UsageSummary {
   weekly_cache_read_tokens?: number;
   daily_input_tokens?: number;
   weekly_input_tokens?: number;
+  // Call counts: successful requests billed into the window (token or
+  // per-call). Failed requests don't count. Display only.
+  daily_call_count?: number;
+  weekly_call_count?: number;
 }
 
 export interface KeyPublic {

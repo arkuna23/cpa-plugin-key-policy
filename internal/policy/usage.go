@@ -117,13 +117,16 @@ func sameDay(a, b time.Time) bool {
 // tokens) used for the cache hit-rate / spend report — these do NOT feed limit
 // enforcement, only the Summary the UI reads.
 //
+// callCount is the number of successful requests to add to CallCount for this
+// record (1 for a normal request, 0 when billing a zero-cost/no-op record).
+//
 // amount is the total dollar bill for the record; cacheCost is the portion of
 // that bill attributable to cache-hit input tokens priced at the cache price
 // (0 when no cache price was configured); cacheReadTokens is the cache-hit
 // count for the record; inputTokens is the non-cache input-token count charged
 // at the regular input price (the denominator partner for hit-rate).
-func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, cacheReadTokens, inputTokens int64) {
-	if amount <= 0 || id == "" {
+func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, cacheReadTokens, inputTokens int64, callCount int64) {
+	if id == "" {
 		return
 	}
 	now := l.now()
@@ -134,6 +137,8 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 	l.ensureWeeklyWindowLocked(st, now)
 	st.Daily.TotalUSD += amount
 	st.Weekly.TotalUSD += amount
+	st.Daily.CallCount += callCount
+	st.Weekly.CallCount += callCount
 	if cacheReadTokens > 0 {
 		st.Daily.CacheReadTokens += cacheReadTokens
 		st.Weekly.CacheReadTokens += cacheReadTokens
@@ -150,6 +155,7 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 	aliasW := st.ByAlias[alias]
 	l.ensureAliasWindowLocked(&aliasW, true, now)
 	aliasW.TotalUSD += amount
+	aliasW.CallCount += callCount
 	aliasW.CacheReadTokens += cacheReadTokens
 	aliasW.CacheCostUSD += cacheCost
 	aliasW.InputTokens += inputTokens
@@ -173,6 +179,11 @@ type UsageSummary struct {
 	WeeklyCacheReadTokens int64     `json:"weekly_cache_read_tokens,omitempty"`
 	DailyInputTokens      int64     `json:"daily_input_tokens,omitempty"`
 	WeeklyInputTokens     int64     `json:"weekly_input_tokens,omitempty"`
+	// DailyCallCount / WeeklyCallCount: number of successful requests billed
+	// into the window (token-billed or per-call). Failed requests don't count.
+	// Reported for display only; not used for limit enforcement.
+	DailyCallCount  int64 `json:"daily_call_count,omitempty"`
+	WeeklyCallCount int64 `json:"weekly_call_count,omitempty"`
 }
 
 // Summary returns the current usage + limits for a key. Limits come from the
@@ -207,6 +218,8 @@ func (l *usageLedger) Summary(key KeyConfig) UsageSummary {
 	summary.WeeklyCacheReadTokens = ensureSt.Weekly.CacheReadTokens
 	summary.DailyInputTokens = ensureSt.Daily.InputTokens
 	summary.WeeklyInputTokens = ensureSt.Weekly.InputTokens
+	summary.DailyCallCount = ensureSt.Daily.CallCount
+	summary.WeeklyCallCount = ensureSt.Weekly.CallCount
 	if !ensureSt.Weekly.WindowStart.IsZero() {
 		summary.WeeklyResetAt = ensureSt.Weekly.WindowStart.Add(weekWindow)
 	}

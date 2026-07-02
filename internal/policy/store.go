@@ -227,7 +227,8 @@ func (s *Store) RecordResponseCost(headers http.Header, query map[string][]strin
 		// happens in RecordUsage via ComputeCacheCostBreakdown. We still record
 		// input tokens for hit-rate denominator parity (treat all prompt tokens
 		// as non-cache input on this path, since we can't tell otherwise).
-		s.usage.RecordCost(key.ID, alias, cost, 0, 0, int64(usage.PromptTokens))
+		// callCount=1: this was a successful, token-billed request.
+		s.usage.RecordCost(key.ID, alias, cost, 0, 0, int64(usage.PromptTokens), 1)
 	}
 	return cost
 }
@@ -240,6 +241,11 @@ func (s *Store) RecordResponseCost(headers http.Header, query map[string][]strin
 // invokes response.intercept_after on the streaming path, so RecordResponseCost
 // alone cannot bill streams. Best-effort: unknown keys or aliases cost nothing.
 //
+// failed reports whether the upstream request failed (non-2xx). Per-call
+// billing only charges on success (failed=false); token billing is implicitly
+// zero on failure (no tokens reported). Failed requests never increment
+// CallCount.
+//
 // key resolution: the host's UsageRecord.APIKey is NOT the client's plaintext
 // secret — CPA stores our auth result's Principal (set to key.ID) into the
 // request context as "userApiKey" and forwards that. So we match by key.ID
@@ -248,7 +254,7 @@ func (s *Store) RecordResponseCost(headers http.Header, query map[string][]strin
 //
 // alias resolution: prefer the client-requested Alias (what the caller put in
 // the request body's "model" field); fall back to the resolved upstream Model.
-func (s *Store) RecordUsage(apiKeyOrID, alias, model string, detail UsageDetail) float64 {
+func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail UsageDetail) float64 {
 	if !s.Enabled() {
 		return 0
 	}
@@ -270,6 +276,28 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, detail UsageDetail)
 	if resolved == "" {
 		return 0
 	}
+	rule, _ := key.ModelForAlias(resolved)
+
+	// Per-call billing: a fixed USD charge per SUCCESSFUL request, independent
+	// of token counts. Failed requests are not charged and don't count. A
+	// PerCallUSD of 0 is allowed (free calls); CallCount still increments so the
+	// UI can report call volume. The token-price fields on the rule are dormant
+	// under this mode.
+	if strings.EqualFold(rule.BillingMode, "per_call") {
+		if failed {
+			return 0
+		}
+		cost := rule.PerCallUSD
+		if cost < 0 {
+			cost = 0
+		}
+		if s.usage != nil {
+			// callCount=1 regardless of cost (even free calls count toward volume).
+			s.usage.RecordCost(key.ID, resolved, cost, 0, 0, 0, 1)
+		}
+		return cost
+	}
+
 	usage := TokenUsage{
 		PromptTokens:     int(detail.InputTokens),
 		CompletionTokens: int(detail.OutputTokens),
@@ -283,7 +311,6 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, detail UsageDetail)
 	// price (falling back to the input price when none is configured), with
 	// provider-specific semantics for whether cache hits sit inside or outside
 	// InputTokens. The owning rule's provider selects the semantics.
-	rule, _ := key.ModelForAlias(resolved)
 	provider := ""
 	if rule.Alias != "" {
 		provider = rule.Provider
@@ -309,7 +336,8 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, detail UsageDetail)
 		}
 	}
 	if cost > 0 && s.usage != nil {
-		s.usage.RecordCost(key.ID, resolved, cost, cacheCost, cacheReadTokens, nonCacheInput)
+		// callCount=1: this was a successful, token-billed request.
+		s.usage.RecordCost(key.ID, resolved, cost, cacheCost, cacheReadTokens, nonCacheInput, 1)
 	}
 	return cost
 }

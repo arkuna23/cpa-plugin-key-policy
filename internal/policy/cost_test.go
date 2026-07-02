@@ -258,7 +258,7 @@ func TestRecordUsageBillsFromParsedTokens(t *testing.T) {
 	hdr := map[string][]string{"Authorization": {"Bearer cpa_stream"}}
 
 	// No body involved — usage came pre-parsed from the host's usage.handle.
-	cost := store.RecordUsage("cpa_stream", "fast", "gpt-5-codex", UsageDetail{
+	cost := store.RecordUsage("cpa_stream", "fast", "gpt-5-codex", false, UsageDetail{
 		InputTokens: 1_000_000, OutputTokens: 0, TotalTokens: 1_000_000,
 	})
 	if !nearly(cost, 1.0) {
@@ -288,7 +288,7 @@ func TestRecordUsageUnknownKeyZeroCost(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	cost := store.RecordUsage("cpa_unknown", "fast", "gpt-5-codex", UsageDetail{
+	cost := store.RecordUsage("cpa_unknown", "fast", "gpt-5-codex", false, UsageDetail{
 		InputTokens: 1_000_000, OutputTokens: 1_000_000,
 	})
 	if cost != 0 {
@@ -318,7 +318,7 @@ func TestRecordUsageMatchesByID(t *testing.T) {
 	hdr := map[string][]string{"Authorization": {"Bearer cpa_secret_xyz"}}
 
 	// Host sends key.ID ("team-x"), NOT the secret. Must still bill.
-	cost := store.RecordUsage("team-x", "fast", "gpt-5-codex", UsageDetail{
+	cost := store.RecordUsage("team-x", "fast", "gpt-5-codex", false, UsageDetail{
 		InputTokens: 500_000, OutputTokens: 0, TotalTokens: 500_000,
 	})
 	if !nearly(cost, 0.50) {

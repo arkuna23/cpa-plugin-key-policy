@@ -289,7 +289,7 @@ func (a *App) handleUsage(raw []byte) ([]byte, error) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return OKEnvelope(UsageHandleResponse{})
 	}
-	_ = a.store.RecordUsage(req.APIKey, req.Alias, req.Model, policy.UsageDetail{
+	_ = a.store.RecordUsage(req.APIKey, req.Alias, req.Model, req.Failed, policy.UsageDetail{
 		InputTokens:         req.Detail.InputTokens,
 		OutputTokens:        req.Detail.OutputTokens,
 		ReasoningTokens:     req.Detail.ReasoningTokens,

@@ -56,7 +56,20 @@ type ModelRule struct {
 	// tokens are reported separately from input; for OpenAI/Gemini/Codex they are
 	// a subset already counted inside input. This price applies to cache-hit
 	// tokens in both cases, replacing the input price for that subset.
+	// Only used when BillingMode == "" or "tokens"; ignored under "per_call".
 	CacheReadPricePerMillion float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
+	// BillingMode selects how this alias is billed per successful request:
+	//   - "" or "tokens" (default): bill by token counts using the three prices
+	//     above (existing behavior).
+	//   - "per_call": bill a fixed PerCallUSD per successful request, ignoring
+	//     token counts. The token-price fields are preserved but dormant; switching
+	//     back to "tokens" reuses them.
+	BillingMode string `yaml:"billing_mode,omitempty" json:"billing_mode,omitempty"`
+	// PerCallUSD is the fixed USD charge per successful request when
+	// BillingMode == "per_call". 0 is allowed (free calls; CallCount still
+	// increments for reporting). Negative is rejected by normalizeConfig. Only
+	// meaningful under "per_call"; ignored under "tokens".
+	PerCallUSD float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
 }
 
 // UsageState holds per-key dollar usage accounting persisted in the state JSON.
@@ -91,6 +104,11 @@ type UsageWindow struct {
 	CacheReadTokens int64     `json:"cache_read_tokens,omitempty"`
 	CacheCostUSD    float64   `json:"cache_cost_usd,omitempty"`
 	InputTokens     int64     `json:"input_tokens,omitempty"`
+	// CallCount is the number of successful requests billed into this window —
+	// both token-billed and per-call-billed requests increment it. Failed
+	// requests do NOT increment it (a per-call charge only applies to HTTP-200
+	// outcomes). Reported for display only; not used for limit enforcement.
+	CallCount int64 `json:"call_count,omitempty"`
 }
 
 type State struct {
@@ -168,6 +186,18 @@ func normalizeConfig(cfg *Config) error {
 			aliases[aliasKey] = struct{}{}
 			if model.InputPricePerMillion < 0 || model.OutputPricePerMillion < 0 || model.CacheReadPricePerMillion < 0 {
 				return fmt.Errorf("key %q model %q prices cannot be negative", key.ID, model.Alias)
+			}
+			// BillingMode: normalize empty to "tokens"; reject unknown modes.
+			switch strings.ToLower(strings.TrimSpace(model.BillingMode)) {
+			case "", "tokens":
+				model.BillingMode = "tokens"
+			case "per_call":
+				model.BillingMode = "per_call"
+			default:
+				return fmt.Errorf("key %q model %q billing_mode %q must be \"tokens\" or \"per_call\"", key.ID, model.Alias, model.BillingMode)
+			}
+			if model.PerCallUSD < 0 {
+				return fmt.Errorf("key %q model %q per_call_usd cannot be negative", key.ID, model.Alias)
 			}
 		}
 	}

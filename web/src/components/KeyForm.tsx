@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import type { KeyPublic, ModelRule } from "../types";
 import ModelPicker from "./ModelPicker";
 import { getPriceTable, lookupPrice, type PriceTable } from "../store/modelPrices";
@@ -30,6 +30,11 @@ interface PriceRow {
   input_price_per_million: number;
   output_price_per_million: number;
   cache_read_price_per_million: number;
+  // per-call billing toggle + fixed charge. billing_mode "tokens" (default)
+  // uses the three token prices; "per_call" uses per_call_usd per successful
+  // request and ignores the token prices (kept dormant for round-tripping).
+  billing_mode: "tokens" | "per_call";
+  per_call_usd: number;
 }
 
 // Price-map key. A model selected under different tiers (codex free vs team)
@@ -70,6 +75,8 @@ export default function KeyForm({
         input_price_per_million: m.input_price_per_million ?? 0,
         output_price_per_million: m.output_price_per_million ?? 0,
         cache_read_price_per_million: m.cache_read_price_per_million ?? 0,
+        billing_mode: m.billing_mode === "per_call" ? "per_call" : "tokens",
+        per_call_usd: m.per_call_usd ?? 0,
       };
     }
     return out;
@@ -108,7 +115,7 @@ export default function KeyForm({
       const updated: Record<string, PriceRow> = {};
       for (const m of next) {
         const key = priceKey(m);
-        updated[key] = prev[key] ?? { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0 };
+        updated[key] = prev[key] ?? { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0, billing_mode: "tokens", per_call_usd: 0 };
       }
       // Rows for (group,alias) pairs no longer selected simply aren't copied.
       return updated;
@@ -120,8 +127,8 @@ export default function KeyForm({
     setPrices((prev) => ({
       ...prev,
       [key]: {
-        ...(prev[key] ?? { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0 }),
-        [field]: parseNum(value),
+        ...(prev[key] ?? { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0, billing_mode: "tokens", per_call_usd: 0 }),
+        [field]: field === "billing_mode" ? (value === "per_call" ? "per_call" : "tokens") : parseNum(value),
       },
     }));
   };
@@ -140,6 +147,11 @@ export default function KeyForm({
         input_price_per_million: row.input_price_per_million,
         output_price_per_million: row.output_price_per_million,
         cache_read_price_per_million: row.cache_read_price_per_million,
+        // Recommend fills token prices; it does not change the billing mode. If
+        // the row was on per_call, keep it (the recommended token prices stay
+        // dormant until the user switches back to tokens).
+        billing_mode: prev[key]?.billing_mode ?? "tokens",
+        per_call_usd: prev[key]?.per_call_usd ?? 0,
       },
     }));
   };
@@ -159,6 +171,8 @@ export default function KeyForm({
         input_price_per_million: row?.input_price_per_million ?? 0,
         output_price_per_million: row?.output_price_per_million ?? 0,
         cache_read_price_per_million: row?.cache_read_price_per_million ?? 0,
+        billing_mode: row?.billing_mode === "per_call" ? "per_call" : "tokens",
+        per_call_usd: row?.per_call_usd ?? 0,
       };
     });
     setBusy(true);
@@ -259,7 +273,10 @@ export default function KeyForm({
         <ModelPicker initial={initial?.models} onChange={handleModelsChange} />
       </div>
 
-      {/* Per-alias pricing table. Stamped onto each ModelRule at submit. */}
+      {/* Per-alias pricing table. Stamped onto each ModelRule at submit.
+          Each row toggles between token pricing (default) and per-call fixed
+          pricing. Under per_call the three token-price inputs are hidden
+          (values retained but dormant) and a single $/call input is shown. */}
       {models.length > 0 && (
         <div className="form-row" style={{ marginTop: 8 }}>
           <label>{t("keyForm.priceLabel")}</label>
@@ -270,6 +287,7 @@ export default function KeyForm({
                   <th>{t("keyForm.colAlias")}</th>
                   <th>{t("keyForm.colProvider")}</th>
                   <th>{t("keyForm.colGroup")}</th>
+                  <th title={t("keyForm.colBillingModeHint")}>{t("keyForm.colBillingMode")}</th>
                   <th>{t("keyForm.colInput")}</th>
                   <th>{t("keyForm.colOutput")}</th>
                   <th title={t("keyForm.colCacheReadHint")}>{t("keyForm.colCacheRead")}</th>
@@ -279,56 +297,95 @@ export default function KeyForm({
               <tbody>
                 {models.map((m) => {
                   const key = priceKey(m);
-                  const row = prices[key] ?? { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0 };
+                  const row = prices[key] ?? { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0, billing_mode: "tokens" as const, per_call_usd: 0 };
+                  const perCall = row.billing_mode === "per_call";
                   const hint = priceTable ? lookupPrice(priceTable, m.target_model) : null;
                   return (
-                    <tr key={key}>
-                      <td className="mono">{m.alias}</td>
-                      <td className="muted">{m.provider}</td>
-                      <td className="muted">{m.group ?? "—"}</td>
-                      <td>
-                        <input
-                          className="input"
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={row.input_price_per_million}
-                          onChange={(e) => setPrice(m, "input_price_per_million", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="input"
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={row.output_price_per_million}
-                          onChange={(e) => setPrice(m, "output_price_per_million", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="input"
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={row.cache_read_price_per_million}
-                          onChange={(e) => setPrice(m, "cache_read_price_per_million", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        {hint && (
-                          <button
-                            type="button"
-                            className="btn sm"
-                            onClick={() => recommend(m)}
-                            title={t("keyForm.recommendTitle")}
-                          >
-                            {t("keyForm.recommend")}
-                          </button>
+                    <Fragment key={key}>
+                      <tr>
+                        <td className="mono">{m.alias}</td>
+                        <td className="muted">{m.provider}</td>
+                        <td className="muted">{m.group ?? "—"}</td>
+                        <td>
+                          <label className="switch" title={t("keyForm.billingModeTitle")}>
+                            <input
+                              type="checkbox"
+                              checked={perCall}
+                              onChange={(e) => setPrice(m, "billing_mode", e.target.checked ? "per_call" : "tokens")}
+                            />
+                            <span className="track"><span className="thumb" /></span>
+                            <span>{perCall ? t("keyForm.billingPerCall") : t("keyForm.billingTokens")}</span>
+                          </label>
+                        </td>
+                        {perCall ? (
+                          <td colSpan={3}>
+                            <div className="form-row" style={{ marginBottom: 0 }}>
+                              <label>{t("keyForm.colPerCall")}</label>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                step="0.0001"
+                                value={row.per_call_usd}
+                                onChange={(e) => setPrice(m, "per_call_usd", e.target.value)}
+                              />
+                            </div>
+                          </td>
+                        ) : (
+                          <>
+                            <td>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={row.input_price_per_million}
+                                onChange={(e) => setPrice(m, "input_price_per_million", e.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={row.output_price_per_million}
+                                onChange={(e) => setPrice(m, "output_price_per_million", e.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={row.cache_read_price_per_million}
+                                onChange={(e) => setPrice(m, "cache_read_price_per_million", e.target.value)}
+                              />
+                            </td>
+                          </>
                         )}
-                      </td>
-                    </tr>
+                        <td>
+                          {!perCall && hint && (
+                            <button
+                              type="button"
+                              className="btn sm"
+                              onClick={() => recommend(m)}
+                              title={t("keyForm.recommendTitle")}
+                            >
+                              {t("keyForm.recommend")}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {perCall && row.per_call_usd === 0 && (
+                        <tr className="muted">
+                          <td colSpan={8} style={{ fontSize: "0.85em" }}>
+                            ⚠ {t("keyForm.perCallZeroWarn")}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

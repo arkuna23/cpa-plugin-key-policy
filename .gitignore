@@ -28,3 +28,4 @@ web/vitest.config.js
 # source for the hosted UI. `make web-build` overwrites it with the real build;
 # the committed copy is a placeholder so the Go build never fails.
 
+node_modules/

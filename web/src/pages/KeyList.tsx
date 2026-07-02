@@ -37,6 +37,11 @@ function UsageCell({ usage }: { usage: UsageSummary }) {
         {usage.weekly_limit_usd > 0 ? ` / ${fmtUsd(usage.weekly_limit_usd)}` : ` / ${t("usage.unlimited")}`}
       </span>
       {weeklyCache && <span className="muted" style={{ fontSize: 11 }}>{t("usage.cache")} {weeklyCache}</span>}
+      {(usage.daily_call_count || usage.weekly_call_count) ? (
+        <span className="muted" style={{ fontSize: 11 }}>
+          {t("usage.calls")} {usage.daily_call_count ?? 0} / {usage.weekly_call_count ?? 0}
+        </span>
+      ) : null}
     </div>
   );
 }
