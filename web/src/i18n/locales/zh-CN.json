@@ -81,6 +81,7 @@
     "billingModeTitle": "切换按 token / 按次计费",
     "colPerCall": "每次 $",
     "perCallZeroWarn": "按次计费单价为 0：将免费调用（仍会计入次数），如非有意请填写价格。",
+    "perCallImageWarn": "图像/视频生成接口（/v1/images、/v1/videos）因 CPA 上游不会上报用量，采用按次计费时在请求准入时预扣费用——即使上游失败也会计费，请知悉。",
     "colInput": "输入单价 $/M",
     "colOutput": "输出单价 $/M",
     "colCacheRead": "缓存读单价 $/M",

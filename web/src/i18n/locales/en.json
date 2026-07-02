@@ -81,6 +81,7 @@
     "billingModeTitle": "Switch between per-token and per-call billing",
     "colPerCall": "$ / call",
     "perCallZeroWarn": "Per-call price is 0: calls are free (still counted). Fill in a price unless this is intentional.",
+    "perCallImageWarn": "Image/video endpoints (/v1/images, /v1/videos) are billed at admission time because CPA does not report usage for them — failed upstream requests are also charged.",
     "colInput": "Input $/M",
     "colOutput": "Output $/M",
     "colCacheRead": "Cache read $/M",

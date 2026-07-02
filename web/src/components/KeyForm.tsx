@@ -385,6 +385,13 @@ export default function KeyForm({
                           </td>
                         </tr>
                       )}
+                      {perCall && (
+                        <tr className="muted">
+                          <td colSpan={8} style={{ fontSize: "0.85em" }}>
+                            ⚠ {t("keyForm.perCallImageWarn")}
+                          </td>
+                        </tr>
+                      )}
                     </Fragment>
                   );
                 })}

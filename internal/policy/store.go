@@ -32,6 +32,12 @@ type AuthDecision struct {
 	ModelList   bool
 	RateLimited bool
 	CostLimited bool
+	// PreCharged reports that this request was billed at access time because
+	// it targets an image/video endpoint whose per_call alias CPA cannot bill
+	// via usage.handle (the XAI executor skips UsageReporter on those paths).
+	// The charge is unconditional (no failure refund), so this is a deliberate
+	// trade-off documented in the UI.
+	PreCharged bool
 }
 
 func NewStore() *Store {
@@ -171,6 +177,29 @@ func (s *Store) Authenticate(method, path string, headers http.Header, query map
 	}
 	decision.Allowed = true
 	decision.Reason = "allowed"
+
+	// Per-call image/video pre-charge workaround. CPA's XAI executor does not
+	// emit usage records for /v1/images/* and /v1/videos/* (executeImages and
+	// executeVideos lack a UsageReporter), so usage.handle never fires and the
+	// plugin would never bill these. When the matched rule is per_call and the
+	// path is an image/video endpoint, charge now, at access time. This is
+	// unconditional (we cannot observe the upstream outcome here), so failed
+	// requests are also charged — a known trade-off surfaced in the UI.
+	if decision.Rule.BillingMode == "per_call" && IsImageVideoEndpoint(path) {
+		alias := decision.Rule.Alias
+		if alias == "" {
+			alias = decision.Requested
+		}
+		model := decision.Rule.TargetModel
+		if model == "" {
+			model = alias
+		}
+		// failed=false so the per_call branch charges PerCallUSD. This is the
+		// intended behavior for this workaround (no refund on upstream failure).
+		s.RecordUsage(key.ID, alias, model, false, UsageDetail{})
+		decision.PreCharged = true
+	}
+
 	return decision
 }
 

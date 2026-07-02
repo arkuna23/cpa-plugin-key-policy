@@ -84,6 +84,44 @@ func IsModelsEndpoint(path string) bool {
 	}
 }
 
+// IsImageVideoEndpoint reports whether path targets the OpenAI-compatible image
+// or video generation endpoints. CPA's XAI executor does not emit usage records
+// for these (executeImages/executeVideos lack a UsageReporter), so the plugin
+// cannot bill them via the normal usage.handle path. We pre-charge per_call
+// aliases on these paths at access time as a workaround.
+func IsImageVideoEndpoint(path string) bool {
+	path = strings.TrimRight(strings.TrimSpace(path), "/")
+	if path == "" {
+		return false
+	}
+	for _, suffix := range []string{
+		"/v1/images/generations",
+		"/v1/images/edits",
+		"/openai/v1/images/generations",
+		"/openai/v1/images/edits",
+		"/v1/videos",
+		"/v1/videos/generations",
+		"/v1/videos/edits",
+		"/v1/videos/extensions",
+		"/openai/v1/videos",
+		"/openai/v1/videos/generations",
+		"/openai/v1/videos/edits",
+		"/openai/v1/videos/extensions",
+	} {
+		if strings.HasSuffix(path, suffix) {
+			return true
+		}
+	}
+	// Prefix match for path-param video subresources (e.g. /v1/videos/<id>).
+	if strings.HasSuffix(path, "/v1/videos") || strings.Contains(path, "/v1/videos/") {
+		return true
+	}
+	if strings.HasSuffix(path, "/openai/v1/videos") || strings.Contains(path, "/openai/v1/videos/") {
+		return true
+	}
+	return false
+}
+
 func RewriteTopLevelModel(body []byte, model string) ([]byte, bool) {
 	model = strings.TrimSpace(model)
 	if model == "" || len(body) == 0 || !json.Valid(body) {
