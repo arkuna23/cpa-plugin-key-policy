@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestStore(t *testing.T) (*Store, string) {
@@ -207,4 +208,182 @@ func TestIsImageVideoEndpoint(t *testing.T) {
 			t.Errorf("IsImageVideoEndpoint(%q) = %v, want %v", c.path, got, c.want)
 		}
 	}
+}
+
+// TestConfigureMergesInMemoryKeysNotOnDisk (Bug 1): a reconfigure that loads
+// a stale disk snapshot (missing a key that exists in memory) must preserve
+// the in-memory key instead of dropping it. Previously Configure did an
+// unconditional s.keys = next, losing any key absent from the disk snapshot.
+func TestConfigureMergesInMemoryKeysNotOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	hash, err := HashKey("cpa_merge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed initial state with one key on disk.
+	s1 := NewStore()
+	if err := s1.Configure(Config{Enabled: true, StateFile: path, Keys: []KeyConfig{
+		{ID: "on-disk", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex"}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// Add a second key via the management API (persisted to disk).
+	if err := s1.UpsertKey(KeyConfig{ID: "in-mem", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex"}}}, true); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a stale disk snapshot: write a state containing only "on-disk".
+	if err := SaveState(path, []KeyConfig{{ID: "on-disk", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex"}}}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Reconfigure with the same path. The stale disk lacks "in-mem", which is
+	// currently in memory. Bug 1 fix must preserve it.
+	if err := s1.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, k := range s1.Keys() {
+		ids[k.ID] = true
+	}
+	if !ids["on-disk"] || !ids["in-mem"] {
+		t.Fatalf("after reconfigure, keys = %v, want both on-disk and in-mem", ids)
+	}
+}
+
+// TestConfigureFlushesBeforeReload (Bug 2): a reconfigure must flush any
+// un-persisted in-memory usage to the OLD state path before loading, so a
+// pending usage change is not lost when the disk snapshot is stale. We verify
+// by recording usage, NOT calling FlushUsage, then reconfiguring with the same
+// path: the usage must survive because Configure flushes first.
+func TestConfigureFlushesBeforeReload(t *testing.T) {
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	hash, err := HashKey("cpa_flush")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore()
+	s.SetClock(func() time.Time { return now })
+	if err := s.Configure(Config{Enabled: true, StateFile: path, Keys: []KeyConfig{
+		{ID: "k", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "openai", TargetModel: "m", InputPricePerMillion: 3, OutputPricePerMillion: 15}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	s.StartUsageFlusher()
+	// Record usage but do NOT flush manually. Without the Bug 2 fix, this
+	// in-memory usage has never been written to disk, so a reconfigure that
+	// LoadState's the (empty-usage) disk would lose it.
+	_ = s.RecordUsage("k", "fast", "m", false, UsageDetail{InputTokens: 1_000_000, OutputTokens: 500_000})
+	// Reconfigure with the same path. Bug 2 fix: Configure flushes first.
+	if err := s.Configure(Config{Enabled: true, StateFile: path, Keys: []KeyConfig{
+		{ID: "k", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "openai", TargetModel: "m", InputPricePerMillion: 3, OutputPricePerMillion: 15}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	sum := s.UsageSummaryFor(imgKey(s, "k"))
+	if sum.DailyUSD <= 0 {
+		t.Fatalf("after reconfigure, DailyUSD = %v, want >0 (usage should have been flushed before reload)", sum.DailyUSD)
+	}
+}
+
+// TestFlushUsagePreservesDiskKeys (Bug 3): the periodic usage flush must not
+// overwrite the on-disk key list. We seed a key on disk, then call FlushUsage
+// on a store whose in-memory key set differs (missing the key). The disk key
+// must survive because FlushUsage only writes usage, not keys.
+func TestFlushUsagePreservesDiskKeys(t *testing.T) {
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	hash, err := HashKey("cpa_p3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed state with one key on disk.
+	seed := NewStore()
+	seed.SetClock(func() time.Time { return now })
+	if err := seed.Configure(Config{Enabled: true, StateFile: path, Keys: []KeyConfig{
+		{ID: "survivor", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "openai", TargetModel: "m", InputPricePerMillion: 3, OutputPricePerMillion: 15}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// Build a second store pointed at the same path but with NO keys in memory,
+	// then record usage and flush. Bug 3 fix: FlushUsage preserves disk keys.
+	s := NewStore()
+	s.SetClock(func() time.Time { return now })
+	if err := s.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	// s now has the disk key (loaded). Remove it from memory to simulate a
+	// truncated in-memory snapshot, then flush usage.
+	s.mu.Lock()
+	delete(s.keys, "survivor")
+	s.mu.Unlock()
+	if err := s.FlushUsage(); err != nil {
+		t.Fatal(err)
+	}
+	// Reload from disk: the key must still be there.
+	chk := NewStore()
+	chk.SetClock(func() time.Time { return now })
+	if err := chk.Configure(Config{Enabled: true, StateFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	if chk.findByID("survivor") == nil {
+		t.Fatalf("disk key 'survivor' was wiped by FlushUsage; Bug 3 regression")
+	}
+}
+
+// TestKeysSnapshotSortedByID (Bug 5): Keys() returns a deterministic order
+// sorted by ID, not random map-iteration order.
+func TestKeysSnapshotSortedByID(t *testing.T) {
+	hash, err := HashKey("cpa_sort")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore()
+	if err := s.Configure(Config{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state.json"), Keys: []KeyConfig{
+		{ID: "zeta", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "a", Provider: "x", TargetModel: "m"}}},
+		{ID: "alpha", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "a", Provider: "x", TargetModel: "m"}}},
+		{ID: "mid", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "a", Provider: "x", TargetModel: "m"}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	got := s.Keys()
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	want := []string{"alpha", "mid", "zeta"}
+	for i, w := range want {
+		if got[i].ID != w {
+			t.Fatalf("Keys()[%d].ID = %q, want %q (full order: %v)", i, got[i].ID, w, keyIDs(got))
+		}
+	}
+	// Run several times: order must be stable (regression check for map
+	// iteration randomness creeping back).
+	for i := 0; i < 20; i++ {
+		ks := s.Keys()
+		for j, w := range want {
+			if ks[j].ID != w {
+				t.Fatalf("iter %d Keys()[%d].ID = %q, want %q", i, j, ks[j].ID, w)
+			}
+		}
+	}
+}
+
+func keyIDs(ks []KeyConfig) []string {
+	out := make([]string, len(ks))
+	for i, k := range ks {
+		out[i] = k.ID
+	}
+	return out
+}
+
+// imgKey returns the KeyConfig for id (helper for tests that need a value, not
+// a pointer, for UsageSummaryFor).
+func imgKey(s *Store, id string) KeyConfig {
+	k := s.findByID(id)
+	if k == nil {
+		panic("key not found: " + id)
+	}
+	return *k
 }

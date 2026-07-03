@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -68,8 +69,17 @@ func (s *Store) Configure(cfg Config) error {
 	if err != nil {
 		return err
 	}
+
+	// Bug 2 fix: flush any in-memory changes to the *old* state path BEFORE
+	// loading the (possibly different) new state file. Without this, keys/usage
+	// changed via the management API in the last <=15s window (or any abnormal
+	// path that skipped persist) would be lost when LoadState reads a stale disk
+	// snapshot. StopUsageFlusher stops the background loop and flushes once.
+	s.StopUsageFlusher()
+
 	keys := cfg.Keys
 	var loadedUsage map[string]*UsageState
+	firstBoot := false
 	if state, errLoad := LoadState(statePath); errLoad == nil {
 		keys = state.Keys
 		loadedUsage = state.Usage
@@ -78,6 +88,8 @@ func (s *Store) Configure(cfg Config) error {
 		}
 	} else if !errors.Is(errLoad, os.ErrNotExist) {
 		return fmt.Errorf("load state: %w", errLoad)
+	} else {
+		firstBoot = true
 	}
 
 	next := make(map[string]*KeyConfig, len(keys))
@@ -95,10 +107,27 @@ func (s *Store) Configure(cfg Config) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Stop any prior flusher before rebuilding keys/state path.
+	// Stop any prior flusher before rebuilding keys/state path. (StopUsageFlusher
+	// above already handled the flush-then-stop for the old path; this guards
+	// against a flusher that started after this point in a re-entrant call.)
 	if s.flusher != nil {
 		s.flusher.stop()
 		s.flusher = nil
+	}
+	// Bug 1 fix: merge instead of replace. Disk keys are authoritative, but any
+	// key present in memory but absent on disk is preserved (e.g. a key added
+	// via the management API whose persist raced with a concurrent reconfigure,
+	// or a state file that was externally truncated). Without this, a stale disk
+	// snapshot silently drops in-memory keys.
+	for id, existing := range s.keys {
+		if _, ok := next[id]; ok {
+			continue
+		}
+		// Preserve the in-memory key. Its usage may already be on disk under
+		// loadedUsage; if not, the usage ledger's residual entries are kept by
+		// loadFromState merging below.
+		copy := *existing
+		next[id] = &copy
 	}
 	s.enabled = cfg.Enabled
 	s.statePath = statePath
@@ -111,6 +140,21 @@ func (s *Store) Configure(cfg Config) error {
 	clockNow := s.usage.now
 	s.usage = newUsageLedger(clockNow)
 	s.usage.loadFromState(loadedUsage)
+
+	// First boot (no state file existed): persist a baseline state so that the
+	// periodic usage flush (SaveUsageOnly) has keys to preserve on disk. Without
+	// this, the first FlushUsage would LoadState, find nothing, and write a
+	// state containing only usage (no keys) — then the next Configure would
+	// load an empty key list. Keys come from next (cfg.Keys or disk), usage is
+	// freshly loaded (empty on first boot). SaveState does not touch s.mu, so
+	// calling it under our lock is safe.
+	if firstBoot {
+		baseKeys := s.keysSnapshotLocked()
+		baseUsage := s.usageSnapshotLocked()
+		if errSave := SaveState(statePath, baseKeys, baseUsage); errSave != nil {
+			return fmt.Errorf("seed state: %w", errSave)
+		}
+	}
 	return nil
 }
 
@@ -480,6 +524,10 @@ func (s *Store) keysSnapshotLocked() []KeyConfig {
 		copy.Models = append([]ModelRule(nil), key.Models...)
 		keys = append(keys, copy)
 	}
+	// Bug 5 fix: stable order by ID so list APIs and frontend rendering are
+	// deterministic (Go map iteration is randomized). Doesn't affect which key
+	// a button targets (bound by id), but prevents rows from jumping around.
+	sort.Slice(keys, func(i, j int) bool { return keys[i].ID < keys[j].ID })
 	return keys
 }
 
@@ -594,14 +642,18 @@ func (s *Store) usageSnapshotLocked() map[string]*UsageState {
 // (reconfigure / shutdown).
 func (s *Store) FlushUsage() error {
 	s.mu.Lock()
-	keys := s.keysSnapshotLocked()
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
 	s.mu.Unlock()
 	if path == "" {
 		return nil
 	}
-	return SaveState(path, keys, usage)
+	// Bug 3 fix: persist only the usage ledger, preserving the key list already
+	// on disk. Keys are mutated synchronously via SaveState in the management
+	// API (UpsertKey/DeleteKey/RotateKey), so the periodic flush must not
+	// overwrite them with an in-memory snapshot that could be stale or
+	// truncated.
+	return SaveUsageOnly(path, usage)
 }
 
 // StartUsageFlusher launches a goroutine that periodically persists the usage

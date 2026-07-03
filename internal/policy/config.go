@@ -325,3 +325,32 @@ func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState) erro
 	}
 	return os.Rename(tmp, path)
 }
+
+// SaveUsageOnly atomically writes only the usage ledger to the state file,
+// preserving the key list already on disk. The key list is authoritative on
+// disk (management API mutates keys + SaveState synchronously), so the
+// periodic usage flush must not overwrite it with a stale in-memory snapshot
+// (Bug 3: FlushUsage rewriting the whole key list could pin a truncated key
+// set to disk if memory was briefly wrong). It loads the current on-disk
+// state, replaces only Usage, and writes back atomically. If the state file
+// does not exist yet, keys defaults to empty (a subsequent key mutation will
+// create it properly via SaveState).
+func SaveUsageOnly(path string, usage map[string]*UsageState) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	var keys []KeyConfig
+	if cur, err := LoadState(path); err == nil {
+		keys = cur.Keys
+	}
+	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC()}
+	raw, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
