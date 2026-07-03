@@ -359,28 +359,30 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 }
 
 type keyWriteRequest struct {
-	ID             string             `json:"id"`
-	Name           *string            `json:"name,omitempty"`
-	Enabled        *bool              `json:"enabled,omitempty"`
-	Key            string             `json:"key,omitempty"`
-	RPM            *int               `json:"rpm,omitempty"`
-	Models         []policy.ModelRule `json:"models,omitempty"`
-	DailyLimitUSD  *float64           `json:"daily_limit_usd,omitempty"`
-	WeeklyLimitUSD *float64           `json:"weekly_limit_usd,omitempty"`
+	ID                  string             `json:"id"`
+	Name                *string            `json:"name,omitempty"`
+	Enabled             *bool              `json:"enabled,omitempty"`
+	Key                 string             `json:"key,omitempty"`
+	RPM                 *int               `json:"rpm,omitempty"`
+	Models              []policy.ModelRule `json:"models,omitempty"`
+	DailyLimitUSD       *float64           `json:"daily_limit_usd,omitempty"`
+	WeeklyLimitUSD      *float64           `json:"weekly_limit_usd,omitempty"`
+	AllowModelsEndpoint *bool              `json:"allow_models_endpoint,omitempty"`
 }
 
 type publicKey struct {
-	ID             string              `json:"id"`
-	Name           string              `json:"name"`
-	Enabled        bool                `json:"enabled"`
-	KeyPreview     string              `json:"key_preview"`
-	RPM            int                 `json:"rpm"`
-	Models         []policy.ModelRule  `json:"models"`
-	DailyLimitUSD  float64             `json:"daily_limit_usd"`
-	WeeklyLimitUSD float64             `json:"weekly_limit_usd"`
-	Usage          policy.UsageSummary `json:"usage"`
-	CreatedAt      string              `json:"created_at,omitempty"`
-	UpdatedAt      string              `json:"updated_at,omitempty"`
+	ID                  string              `json:"id"`
+	Name                string              `json:"name"`
+	Enabled             bool                `json:"enabled"`
+	KeyPreview          string              `json:"key_preview"`
+	RPM                 int                 `json:"rpm"`
+	Models              []policy.ModelRule  `json:"models"`
+	DailyLimitUSD       float64             `json:"daily_limit_usd"`
+	WeeklyLimitUSD      float64             `json:"weekly_limit_usd"`
+	AllowModelsEndpoint bool                `json:"allow_models_endpoint,omitempty"`
+	Usage               policy.UsageSummary `json:"usage"`
+	CreatedAt           string              `json:"created_at,omitempty"`
+	UpdatedAt           string              `json:"updated_at,omitempty"`
 }
 
 func (a *App) createKey(body []byte) ManagementResponse {
@@ -419,15 +421,16 @@ func (a *App) createKey(body []byte) ManagementResponse {
 		name = strings.TrimSpace(*req.Name)
 	}
 	item := policy.KeyConfig{
-		ID:             req.ID,
-		Name:           name,
-		Enabled:        enabled,
-		KeyHash:        hash,
-		KeyPreview:     policy.PreviewKey(plain),
-		RPM:            rpm,
-		Models:         req.Models,
-		DailyLimitUSD:  applyFloat64(req.DailyLimitUSD, 0),
-		WeeklyLimitUSD: applyFloat64(req.WeeklyLimitUSD, 0),
+		ID:                  req.ID,
+		Name:                name,
+		Enabled:             enabled,
+		KeyHash:             hash,
+		KeyPreview:          policy.PreviewKey(plain),
+		RPM:                 rpm,
+		Models:              req.Models,
+		DailyLimitUSD:       applyFloat64(req.DailyLimitUSD, 0),
+		WeeklyLimitUSD:      applyFloat64(req.WeeklyLimitUSD, 0),
+		AllowModelsEndpoint: applyBool(req.AllowModelsEndpoint, false),
 	}
 	if err := a.store.UpsertKey(item, true); err != nil {
 		return jsonError(http.StatusBadRequest, "invalid_policy", err.Error())
@@ -475,6 +478,9 @@ func (a *App) patchKey(body []byte) ManagementResponse {
 	}
 	if req.WeeklyLimitUSD != nil {
 		current.WeeklyLimitUSD = *req.WeeklyLimitUSD
+	}
+	if req.AllowModelsEndpoint != nil {
+		current.AllowModelsEndpoint = *req.AllowModelsEndpoint
 	}
 	if req.Models != nil {
 		current.Models = req.Models
@@ -583,10 +589,11 @@ func (a *App) publicKeyFromConfig(key policy.KeyConfig) publicKey {
 		RPM:        key.RPM,
 		// Ensure models always serializes as [] (never null). A nil slice would
 		// marshal to JSON null, which the UI accesses as .length and crashes on.
-		Models:         append([]policy.ModelRule{}, key.Models...),
-		DailyLimitUSD:  key.DailyLimitUSD,
-		WeeklyLimitUSD: key.WeeklyLimitUSD,
-		Usage:          a.store.UsageSummaryFor(key),
+		Models:              append([]policy.ModelRule{}, key.Models...),
+		DailyLimitUSD:       key.DailyLimitUSD,
+		WeeklyLimitUSD:      key.WeeklyLimitUSD,
+		AllowModelsEndpoint: key.AllowModelsEndpoint,
+		Usage:               a.store.UsageSummaryFor(key),
 	}
 	if !key.CreatedAt.IsZero() {
 		out.CreatedAt = key.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
@@ -598,6 +605,13 @@ func (a *App) publicKeyFromConfig(key policy.KeyConfig) publicKey {
 }
 
 func applyFloat64(v *float64, def float64) float64 {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+func applyBool(v *bool, def bool) bool {
 	if v == nil {
 		return def
 	}

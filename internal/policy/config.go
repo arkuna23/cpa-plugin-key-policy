@@ -27,8 +27,15 @@ type KeyConfig struct {
 	KeyPreview string      `yaml:"key_preview" json:"key_preview"`
 	RPM        int         `yaml:"rpm" json:"rpm"`
 	Models     []ModelRule `yaml:"models" json:"models"`
-	// DailyLimitUSD caps the dollar usage per UTC calendar day. 0 = unlimited.
-	DailyLimitUSD float64 `yaml:"daily_limit_usd,omitempty" json:"daily_limit_usd,omitempty"`
+	// AllowModelsEndpoint lets this key reach GET /v1/models. CPA has no way
+	// for a plugin to filter the model list per downstream key (OpenAIModels
+	// returns the global registry and never goes through an executor or
+	// response interceptor, and the access hook can only 401/allow — not
+	// rewrite the body). So the only per-key control we can enforce at the
+	// plugin layer is the binary choice: 401 (hide the list entirely) or
+	// allow (client sees the full global list). Default false = 401.
+	AllowModelsEndpoint bool    `yaml:"allow_models_endpoint,omitempty" json:"allow_models_endpoint,omitempty"`
+	DailyLimitUSD       float64 `yaml:"daily_limit_usd,omitempty" json:"daily_limit_usd,omitempty"`
 	// WeeklyLimitUSD caps the dollar usage over a rolling 7-day window. 0 = unlimited.
 	WeeklyLimitUSD float64   `yaml:"weekly_limit_usd,omitempty" json:"weekly_limit_usd,omitempty"`
 	CreatedAt      time.Time `yaml:"created_at,omitempty" json:"created_at,omitempty"`
@@ -76,15 +83,15 @@ type ModelRule struct {
 // UsageState holds per-key dollar usage accounting persisted in the state JSON.
 // It carries rolling daily/weekly windows plus a per-alias breakdown
 // (ByAlias). The per-alias breakdown tracks BOTH a daily and a weekly window
-// (see AliasUsageWindows) so the key detail page can show per-alias today / 
+// (see AliasUsageWindows) so the key detail page can show per-alias today /
 // rolling-week figures.
 //
 // Legacy state files stored ByAlias as map[string]UsageWindow (a single
 // window per alias). UsageState.UnmarshalJSON auto-migrates that shape into
 // the dual-window form (old value → Daily; Weekly zeroed).
 type UsageState struct {
-	Daily   UsageWindow                `json:"daily"`
-	Weekly  UsageWindow                `json:"weekly"`
+	Daily   UsageWindow                  `json:"daily"`
+	Weekly  UsageWindow                  `json:"weekly"`
 	ByAlias map[string]AliasUsageWindows `json:"by_alias,omitempty"`
 }
 
@@ -175,7 +182,7 @@ type UsageWindow struct {
 	// OutputTokens is the non-cache completion-token count billed in this
 	// window (tokens charged at the output price). Reported for display on the
 	// per-alias detail page; not used for limit enforcement.
-	OutputTokens    int64     `json:"output_tokens,omitempty"`
+	OutputTokens int64 `json:"output_tokens,omitempty"`
 	// CallCount is the number of successful requests billed into this window —
 	// both token-billed and per-call-billed requests increment it. Failed
 	// requests do NOT increment it (a per-call charge only applies to HTTP-200

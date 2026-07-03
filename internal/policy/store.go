@@ -190,6 +190,14 @@ func (s *Store) Authenticate(method, path string, headers http.Header, query map
 		return decision
 	}
 	if decision.ModelList {
+		// Per-key override: a key with AllowModelsEndpoint=true may reach the
+		// global /v1/models list; otherwise it's 401. We still cannot filter the
+		// list contents per key (CPA limitation above), only hide/show it.
+		if key.AllowModelsEndpoint {
+			decision.Allowed = true
+			decision.Reason = "models_endpoint_allowed"
+			return decision
+		}
 		decision.Reason = "models_endpoint_disabled"
 		return decision
 	}
@@ -294,7 +302,11 @@ func (s *Store) RecordResponseCost(headers http.Header, query map[string][]strin
 	}
 	inputPerMillion, outputPerMillion, _, priced := key.PriceForAlias(alias)
 	cost := ComputeCost(inputPerMillion, outputPerMillion, priced, usage)
-	if cost > 0 && s.usage != nil {
+	if priced && usage.Found && s.usage != nil {
+		// Record even when cost == 0 (a priced-but-free alias: input/output/cache
+		// prices all configured as 0). Token / call counters must still advance so
+		// the UI can report usage volume and hit-rate; the USD just stays 0.
+		// Previously `cost > 0` dropped free-but-priced requests entirely.
 		// The response-body path sees only prompt/completion counts (no cache
 		// breakdown), so cache counters stay 0 here; cache-aware accounting
 		// happens in RecordUsage via ComputeCacheCostBreakdown. We still record
@@ -408,7 +420,11 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail
 			nonCacheInput = detail.InputTokens - cr
 		}
 	}
-	if cost > 0 && s.usage != nil {
+	if priced && usage.Found && s.usage != nil {
+		// Record even when cost == 0 (priced-but-free alias: all token prices 0).
+		// Token (input/output/cache) + call counters must advance so the UI
+		// reports usage volume and hit-rate; USD stays 0. Previously `cost > 0`
+		// dropped free-but-priced requests entirely, hiding their volume.
 		// callCount=1: this was a successful, token-billed request.
 		s.usage.RecordCost(key.ID, resolved, cost, cacheCost, cacheReadTokens, nonCacheInput, int64(detail.OutputTokens), 1)
 	}

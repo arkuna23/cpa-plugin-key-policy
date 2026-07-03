@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -462,6 +463,97 @@ func TestPerCallBillsFixedUSD(t *testing.T) {
 	}
 }
 
+// TestTokenModeFreeAliasStillCounts: a token-mode alias whose configured
+// input/output/cache prices are all 0 (priced=true but free) must still
+// record token + call counters. Previously both RecordResponseCost and
+// RecordUsage gated RecordCost on `cost > 0`, dropping free-but-priced
+// requests entirely so their usage volume / hit-rate was invisible.
+func TestTokenModeFreeAliasStillCounts(t *testing.T) {
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	store := NewStore()
+	store.SetClock(func() time.Time { return now })
+	hash, err := HashKey("cpa_free2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Configure(Config{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state.json"), Keys: []KeyConfig{{
+		ID: "free", Enabled: true, KeyHash: hash,
+		Models: []ModelRule{{
+			Alias: "fast", Provider: "anthropic", TargetModel: "m",
+			InputPricePerMillion:     0,
+			OutputPricePerMillion:    0,
+			CacheReadPricePerMillion: 0,
+		}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	// usage.handle path (RecordUsage): non-zero tokens, all prices 0.
+	cost := store.RecordUsage("free", "fast", "m", false, UsageDetail{
+		InputTokens: 1_000_000, OutputTokens: 500_000, CacheReadTokens: 200_000,
+	})
+	if cost != 0 {
+		t.Fatalf("cost = %v, want 0 (free alias)", cost)
+	}
+	sum := store.UsageSummaryFor(store.Keys()[0])
+	if sum.DailyCallCount != 1 {
+		t.Fatalf("DailyCallCount = %d, want 1 (free call must still count)", sum.DailyCallCount)
+	}
+	if sum.DailyInputTokens != 1_000_000 {
+		t.Fatalf("DailyInputTokens = %d, want 1000000 (Anthropic input excludes cache reads)", sum.DailyInputTokens)
+	}
+	if sum.DailyCacheReadTokens != 200_000 {
+		t.Fatalf("DailyCacheReadTokens = %d, want 200000 (cache tokens must count even when free)", sum.DailyCacheReadTokens)
+	}
+}
+
+// TestAllowModelsEndpointPerKey: a key with AllowModelsEndpoint=true may reach
+// GET /v1/models (allowed); a key with it false (default) is 401. We cannot
+// filter the list contents per key (CPA limitation), only hide/show it.
+func TestAllowModelsEndpointPerKey(t *testing.T) {
+	hash, err := HashKey("cpa_models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore()
+	if err := store.Configure(Config{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state.json"), Keys: []KeyConfig{
+		{ID: "hidden", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex"}}},
+		{ID: "open", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex"}}, AllowModelsEndpoint: true},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	hdr := http.Header{"Authorization": {"Bearer " + "cpa_models"}}
+
+	dHidden := store.Authenticate("GET", "/v1/models", hdr, nil, nil)
+	if dHidden.Allowed || dHidden.Reason != "models_endpoint_disabled" {
+		t.Fatalf("hidden key decision = %+v, want models_endpoint_disabled", dHidden)
+	}
+
+	dOpen := store.Authenticate("GET", "/v1/models", hdr, nil, nil)
+	// Same header hashes to one secret; both keys share it. To pick the "open"
+	// key explicitly, match by ID via a second secret. Simpler: add a distinct
+	// secret per key by mutating the hash below. Reconfigure with unique secrets.
+	_ = dOpen // (crafted below with unique secrets instead)
+
+	// Recreate with distinct secrets so Authenticate resolves the intended key.
+	store2 := NewStore()
+	hashA, _ := HashKey("cpa_a")
+	hashB, _ := HashKey("cpa_b")
+	if err := store2.Configure(Config{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state2.json"), Keys: []KeyConfig{
+		{ID: "hidden", Enabled: true, KeyHash: hashA, Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex"}}},
+		{ID: "open", Enabled: true, KeyHash: hashB, Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex"}}, AllowModelsEndpoint: true},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	dHidden2 := store2.Authenticate("GET", "/v1/models", http.Header{"Authorization": {"Bearer cpa_a"}}, nil, nil)
+	if dHidden2.Allowed || dHidden2.Reason != "models_endpoint_disabled" {
+		t.Fatalf("hidden key (secret a) = %+v, want models_endpoint_disabled", dHidden2)
+	}
+	dOpen2 := store2.Authenticate("GET", "/v1/models", http.Header{"Authorization": {"Bearer cpa_b"}}, nil, nil)
+	if !dOpen2.Allowed || dOpen2.Reason != "models_endpoint_allowed" {
+		t.Fatalf("open key (secret b) = %+v, want Allowed + models_endpoint_allowed", dOpen2)
+	}
+}
+
 // TestPerCallFailedNotBilled: a failed request charges nothing and does not
 // increment CallCount (per-call only applies to HTTP-200 outcomes).
 func TestPerCallFailedNotBilled(t *testing.T) {
@@ -513,7 +605,7 @@ func TestAliasUsageBreakdown(t *testing.T) {
 		return Config{Enabled: true, StateFile: statePath, Keys: []KeyConfig{{
 			ID: "team-a", Enabled: true,
 			KeyHash: hashForUsageTest(t, "cpa_usage"),
-			Models: models,
+			Models:  models,
 		}}}
 	}
 	fast := ModelRule{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex",
