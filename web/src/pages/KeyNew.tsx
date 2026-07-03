@@ -25,6 +25,7 @@ export default function KeyNew() {
             models: v.models,
             daily_limit_usd: v.daily_limit_usd,
             weekly_limit_usd: v.weekly_limit_usd,
+            allow_models_endpoint: v.allow_models_endpoint,
           });
           setPlain(r.plain_key);
         }}
