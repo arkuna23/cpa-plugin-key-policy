@@ -383,12 +383,13 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 
 /* --- Mobile-only component classes (hidden on desktop, shown on mobile) --- */
-/* .card-stack: the mobile key list container. Hidden on desktop. */
-.card-stack { display: none; }
+/* .card-stack: the mobile key list container. Hidden on desktop by the
+   @media (min-width:641px) block at the end of this file. */
+.card-stack { }
 
-/* .tabbar: bottom sticky navigation. Hidden on desktop. */
+/* .tabbar: bottom sticky navigation. Hidden on desktop by the min-width
+   block; shown on mobile by the max-width block below. */
 .tabbar {
-  display: none;
   position: fixed; bottom: 0; left: 0; right: 0;
   height: 56px; z-index: 100;
   background: var(--panel);
@@ -415,7 +416,6 @@ td.strong { font-weight: 600; color: var(--text); }
 
 /* .fab: floating action button. Hidden on desktop. */
 .fab {
-  display: none;
   position: fixed; bottom: 72px; right: 16px; z-index: 99;
   width: 52px; height: 52px; border-radius: var(--r-full);
   background: var(--accent); color: var(--on-accent);

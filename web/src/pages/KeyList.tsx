@@ -216,7 +216,7 @@ function KeyCard({ k, onDelete }: { k: KeyPublic; onDelete: (id: string) => void
   const ref = useRef<HTMLDivElement>(null);
   const [dx, setDx] = useState(0);          // current swipe translate
   const [revoking, setRevoking] = useState(false);
-  const startX = useRef(0); const startY = useRef(0); const dragging = useRef(false); const horizontal = useRef(false);
+  const startX = useRef(0); const startY = useRef(0); const dragging = useRef(false); const horizontal = useRef(false); const moved = useRef(false);
 
   const limit = k.usage.daily_limit_usd > 0 ? k.usage.daily_limit_usd : 0;
   const pct = limit > 0 ? Math.min(100, (k.usage.daily_usd / limit) * 100) : 0;
@@ -226,7 +226,7 @@ function KeyCard({ k, onDelete }: { k: KeyPublic; onDelete: (id: string) => void
   const moreCount = Math.max(0, models.length - 2);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    dragging.current = true; horizontal.current = false;
+    dragging.current = true; horizontal.current = false; moved.current = false;
     startX.current = e.clientX; startY.current = e.clientY;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
   };
@@ -239,6 +239,7 @@ function KeyCard({ k, onDelete }: { k: KeyPublic; onDelete: (id: string) => void
     }
     if (horizontal.current) {
       e.preventDefault();
+      moved.current = true;
       setDx(Math.max(-96, Math.min(0, ddx))); // only allow left swipe
     }
   };
@@ -248,9 +249,17 @@ function KeyCard({ k, onDelete }: { k: KeyPublic; onDelete: (id: string) => void
     if (horizontal.current) {
       if (dx <= -64) { setRevoking(true); setDx(-88); }
       else { setDx(0); }
-    } else if (!revoking) {
-      nav(`/keys/${encodeURIComponent(k.id)}/usage`);
     }
+  };
+
+  // Click handles tap-to-open. Skipped when the pointer turned into a swipe
+  // (moved.current) or the revoke panel is revealed, so a swipe doesn't also
+  // navigate. Using onClick (instead of navigating from pointerup) is more
+  // reliable on mobile browsers where pointerup can be swallowed by touch
+  // handling.
+  const onClick = () => {
+    if (moved.current || revoking) return;
+    nav(`/keys/${encodeURIComponent(k.id)}/usage`);
   };
 
   const doRevoke = () => { setDx(0); setRevoking(false); onDelete(k.id); };
@@ -263,6 +272,7 @@ function KeyCard({ k, onDelete }: { k: KeyPublic; onDelete: (id: string) => void
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onClick={onClick}
       style={{ transform: `translateX(${dx}px)`, touchAction: "pan-y" }}
     >
       <div className="kc-revoke" style={{ opacity: revoking || dx < -8 ? 1 : 0, transition: "opacity 150ms" }}
