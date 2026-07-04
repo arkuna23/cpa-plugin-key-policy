@@ -117,6 +117,8 @@ export interface AliasUsageEntry {
 export interface KeyUsageResponse {
   key_id: string;
   key_name: string;
+  daily_limit_usd: number;
+  weekly_limit_usd: number;
   aliases: AliasUsageEntry[];
 }
 

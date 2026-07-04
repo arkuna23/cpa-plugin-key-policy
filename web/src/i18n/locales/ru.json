@@ -48,7 +48,17 @@
     "deleteFailed": "Ошибка удаления",
     "notFound": "Ключ не найден",
     "rotated": "Создан новый ключ (смена)",
-    "detail": "Детали"
+    "detail": "Детали",
+    "mobile": {
+      "revoke": "Отозвать",
+      "swipeHint": "Смахните влево для отзыва",
+      "modelsSuffix": "моделей",
+      "tabKeys": "Ключи",
+      "tabUsage": "Использование",
+      "tabNew": "Новый",
+      "callCount": "{{n}} вызовов",
+      "noLimit": "без лимита"
+    }
   },
   "edit": {
     "title": "Изменить ключ · {{id}}",
@@ -153,6 +163,25 @@
     "colHitRate": "Попадания",
     "billingTokens": "токены",
     "billingPerCall": "за вызов",
-    "notInConfig": "нет в конфиге"
+    "notInConfig": "нет в конфиге",
+    "mobile": {
+      "today": "Сегодня",
+      "thisWeek": "Эта неделя",
+      "byAlias": "По псевдониму",
+      "limit": "Лимит",
+      "remaining": "Остаток",
+      "calls": "Вызовы",
+      "inputTok": "Вход",
+      "outputTok": "Выход",
+      "noLimit": "без лимита",
+      "models": "Модели",
+      "todaySpend": "Расход сегодня",
+      "weekSpend": "Эта неделя",
+      "avgRpm": "Средн. RPM",
+      "maxRpm": "RPM макс",
+      "viewUsage": "Подробности использования",
+      "tokenMix": "Состав токенов",
+      "last7Days": "Последние 7 дней"
+    }
   }
 }

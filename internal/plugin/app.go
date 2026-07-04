@@ -538,9 +538,11 @@ func (a *App) keyUsage(id string) ManagementResponse {
 		return jsonError(http.StatusNotFound, "not_found", "key not found")
 	}
 	return jsonResponse(http.StatusOK, map[string]any{
-		"key_id":   key.ID,
-		"key_name": key.Name,
-		"aliases":  aliases,
+		"key_id":           key.ID,
+		"key_name":         key.Name,
+		"daily_limit_usd":  key.DailyLimitUSD,
+		"weekly_limit_usd": key.WeeklyLimitUSD,
+		"aliases":          aliases,
 	})
 }
 

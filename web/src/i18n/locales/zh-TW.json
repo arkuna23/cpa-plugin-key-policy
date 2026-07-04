@@ -48,7 +48,17 @@
     "deleteFailed": "刪除失敗",
     "notFound": "找不到該 key",
     "rotated": "新 Key 已產生（輪換）",
-    "detail": "詳情"
+    "detail": "詳情",
+    "mobile": {
+      "revoke": "吊銷",
+      "swipeHint": "左滑可吊銷",
+      "modelsSuffix": "個模型",
+      "tabKeys": "密鑰",
+      "tabUsage": "用量",
+      "tabNew": "新建",
+      "callCount": "{{n}} 次呼叫",
+      "noLimit": "不限"
+    }
   },
   "edit": {
     "title": "編輯 Key · {{id}}",
@@ -153,6 +163,25 @@
     "colHitRate": "命中率",
     "billingTokens": "按 token",
     "billingPerCall": "按次",
-    "notInConfig": "已不在設定中"
+    "notInConfig": "已不在設定中",
+    "mobile": {
+      "today": "今日",
+      "thisWeek": "本週",
+      "byAlias": "依別名",
+      "limit": "上限",
+      "remaining": "剩餘",
+      "calls": "呼叫",
+      "inputTok": "輸入",
+      "outputTok": "輸出",
+      "noLimit": "不限",
+      "models": "模型",
+      "todaySpend": "今日花費",
+      "weekSpend": "本週花費",
+      "avgRpm": "平均 RPM",
+      "maxRpm": "RPM 上限",
+      "viewUsage": "查看用量明細",
+      "tokenMix": "Token 構成",
+      "last7Days": "最近 7 天"
+    }
   }
 }

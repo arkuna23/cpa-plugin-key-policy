@@ -317,3 +317,340 @@ td.strong { font-weight: 600; color: var(--text); }
   border: 1px solid var(--danger-border);
   border-radius: var(--r-sm); padding: 1px 6px;
 }
+
+/* ===================================================================
+   MOBILE LAYOUT (@media max-width: 640px)
+   Desktop styles above are untouched. Everything below only applies to
+   phone-width screens, implementing the Stitch "Quiet Paper" mobile design:
+   key cards instead of tables, ink-drop progress bars, horizontal bar
+   rankings, bottom-sheet forms, bottom sticky tab bar. Theme colors come
+   from the same CSS variables, so light/white/dark all work automatically.
+   ==================================================================== */
+
+/* --- Reset desktop-only layout assumptions for narrow screens --- */
+@media (max-width: 640px) {
+  .app { max-width: 100%; margin: 0; padding: 0 16px 88px; }
+
+  /* Header: stack title + actions, allow wrap. Drop the top buttons since
+     the bottom tab bar + FAB replace them on mobile. */
+  .header {
+    flex-wrap: wrap; gap: 12px;
+    padding: 12px 0; margin-bottom: 16px;
+    position: sticky; top: 0; z-index: 50;
+    background: var(--bg);
+  }
+  .header h1 { font-size: 18px; }
+  .header .sub { font-size: 11px; }
+  /* Hide header nav buttons on mobile — replaced by bottom tab bar. */
+  .header .actions { display: none; }
+
+  /* Forms: single column, no 2-col grids. */
+  .row2 { grid-template-columns: 1fr; gap: 12px; }
+  .form-row { margin-bottom: 14px; }
+
+  /* Modal becomes a bottom sheet: full width, anchored to bottom, rounded
+     top corners, grabber handle added by the component. */
+  .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal {
+    max-width: 100%; width: 100%;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding: 16px 16px 88px;
+    max-height: 92vh;
+  }
+
+  /* Tables are hidden on mobile — replaced by card stacks. The .card-stack
+     sibling is shown instead. */
+  .card.table-wrap { display: none; }
+  .card-stack { display: block; }
+
+  /* Desktop action rows (refresh/newKey above the table) are hidden on
+     mobile — FAB + pull-to-refresh replace them. */
+  .actions.mobile-hidden { display: none; }
+
+  /* KeyForm submit row: sticky bottom on mobile so the primary action stays
+     reachable without scrolling past all model rows. */
+  form.card > .actions {
+    position: sticky; bottom: 64px; z-index: 10;
+    background: var(--panel); padding: 12px 0; margin-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  form.card > .actions .btn.primary { flex: 1; }
+
+  /* KeyForm pricing table: on mobile, allow horizontal scroll inside the
+     card so wide price rows don't overflow the viewport. */
+  form.card .card.table-wrap { display: block; overflow-x: auto; }
+  form.card .card.table-wrap table { min-width: 520px; }
+}
+
+/* --- Mobile-only component classes (hidden on desktop, shown on mobile) --- */
+/* .card-stack: the mobile key list container. Hidden on desktop. */
+.card-stack { display: none; }
+
+/* .tabbar: bottom sticky navigation. Hidden on desktop. */
+.tabbar {
+  display: none;
+  position: fixed; bottom: 0; left: 0; right: 0;
+  height: 56px; z-index: 100;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  align-items: stretch;
+}
+.tabbar .tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 2px;
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 11px; font-weight: 600;
+  font-family: inherit; padding: 0;
+  position: relative;
+}
+.tabbar .tab .tab-icon { font-size: 18px; line-height: 1; }
+.tabbar .tab.active { color: var(--accent); }
+.tabbar .tab.active::before {
+  content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 24px; height: 2px; background: var(--accent); border-radius: var(--r-full);
+}
+@media (max-width: 640px) {
+  .tabbar { display: flex; }
+}
+
+/* .fab: floating action button. Hidden on desktop. */
+.fab {
+  display: none;
+  position: fixed; bottom: 72px; right: 16px; z-index: 99;
+  width: 52px; height: 52px; border-radius: var(--r-full);
+  background: var(--accent); color: var(--on-accent);
+  border: none; cursor: pointer;
+  font-size: 26px; line-height: 1; font-weight: 300;
+  box-shadow: 0 4px 20px rgba(139, 134, 128, 0.28);
+  align-items: center; justify-content: center;
+  transition: transform var(--t-fast), box-shadow var(--t-fast);
+}
+.fab:hover { transform: scale(1.05); }
+.fab:active { transform: scale(0.96); }
+@media (max-width: 640px) {
+  .fab { display: inline-flex; }
+}
+
+/* .keycard: one key in the mobile list. */
+.keycard {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  position: relative;
+  overflow: hidden;
+}
+.keycard:hover { border-color: var(--border-hover); }
+.keycard.disabled { opacity: 0.55; }
+.keycard .kc-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px;
+}
+.keycard .kc-dot {
+  width: 8px; height: 8px; border-radius: var(--r-full); flex: none;
+  background: var(--ok);
+}
+.keycard.disabled .kc-dot { background: var(--danger); }
+.keycard .kc-name { font-weight: 600; font-size: 15px; flex: 1; }
+.keycard .kc-chevron { color: var(--muted); font-size: 16px; }
+.keycard .kc-preview {
+  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
+  font-size: 12px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 10px;
+}
+/* ink-drop progress bar */
+.keycard .kc-bar {
+  height: 4px; border-radius: var(--r-full);
+  background: var(--muted-bg); overflow: hidden; margin-bottom: 6px;
+}
+.keycard .kc-bar > span {
+  display: block; height: 100%; border-radius: var(--r-full);
+  background: var(--accent); transition: width var(--t-fast);
+}
+.keycard.over .kc-bar > span { background: var(--danger); }
+.keycard .kc-meta {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--muted);
+}
+.keycard .kc-chips {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
+}
+.keycard .kc-chips .chip {
+  font-size: 11px; padding: 2px 8px; border-radius: var(--r-sm);
+  background: var(--muted-bg); color: var(--muted);
+  border: 1px solid var(--border);
+}
+.keycard .kc-chips .chip.more { color: var(--muted); font-weight: 600; }
+/* swipe-to-revoke layer */
+.keycard .kc-revoke {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: 88px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 4px;
+  background: var(--danger-soft); color: var(--danger);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+}
+.keycard .kc-revoke .revoke-icon { font-size: 18px; }
+
+/* .usage-hero: the big-number card at the top of the mobile usage page. */
+.usage-hero {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 18px; margin-bottom: 16px;
+}
+.usage-hero .uh-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  color: var(--muted); text-transform: uppercase;
+}
+.usage-hero .uh-amount {
+  font-size: 34px; font-weight: 700; line-height: 1.1; margin: 2px 0 12px;
+}
+.usage-hero .uh-amount .uh-unit {
+  font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 6px;
+}
+.usage-hero .uh-row {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.usage-hero .uh-ring {
+  width: 64px; height: 64px; position: relative; flex: none;
+}
+.usage-hero .uh-ring svg { transform: rotate(-90deg); }
+.usage-hero .uh-ring .uh-pct {
+  position: absolute; inset: 0; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: var(--text);
+}
+.usage-hero .uh-limits { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.usage-hero .uh-limits .uh-lk { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.usage-hero .uh-limits .uh-lv { font-weight: 600; }
+.usage-hero .uh-stats {
+  display: flex; gap: 0; margin-top: 12px;
+  font-size: 11px; color: var(--muted);
+  border-top: 1px solid var(--border); padding-top: 10px;
+}
+.usage-hero .uh-stats > span { flex: 1; text-align: center; }
+.usage-hero .uh-stats > span + span { border-left: 1px solid var(--border); }
+
+/* .seg: segmented daily/weekly toggle. */
+.seg {
+  display: inline-flex; background: var(--muted-bg);
+  border-radius: var(--r-md); padding: 2px; gap: 2px; margin-bottom: 16px;
+}
+.seg .seg-btn {
+  border: none; background: none; cursor: pointer;
+  padding: 6px 16px; border-radius: calc(var(--r-md) - 2px);
+  font-size: 13px; font-weight: 600; color: var(--muted); font-family: inherit;
+  transition: all var(--t-fast);
+}
+.seg .seg-btn.active { background: var(--accent); color: var(--on-accent); }
+
+/* .bar-rank: horizontal bar ranking (replaces the alias table on mobile). */
+.bar-rank { display: flex; flex-direction: column; gap: 12px; }
+.bar-rank .br-row { cursor: pointer; }
+.bar-rank .br-top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 5px;
+}
+.bar-rank .br-name { font-size: 14px; font-weight: 600; }
+.bar-rank .br-usd {
+  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
+  font-size: 14px; font-weight: 600;
+}
+.bar-rank .br-bar {
+  height: 8px; border-radius: var(--r-full);
+  background: var(--muted-bg); overflow: hidden; margin-bottom: 4px;
+}
+.bar-rank .br-bar > span {
+  display: block; height: 100%; border-radius: var(--r-full);
+  background: var(--accent);
+}
+.bar-rank .br-cap {
+  font-size: 11px; color: var(--muted);
+}
+.bar-rank .br-residual { opacity: 0.7; }
+.bar-rank .br-badge {
+  display: inline-block; margin-left: 6px;
+  font-size: 9px; font-weight: 700; color: var(--danger);
+  background: var(--danger-soft); border: 1px solid var(--danger-border);
+  border-radius: var(--r-sm); padding: 0 4px;
+}
+
+/* .detail-card: dossier card on the key-detail mobile page. */
+.detail-card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 16px; margin-bottom: 16px;
+}
+.detail-card .dc-statusrow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.detail-card .dc-statusrow .dc-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--ok); display: inline-block; margin-right: 6px; }
+.detail-card.disabled .dc-statusrow .dc-dot { background: var(--danger); }
+.detail-card .dc-keypill {
+  background: var(--muted-bg); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 8px 10px; margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.detail-card .dc-keypill .dc-keytext {
+  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
+  font-size: 12px; color: var(--muted); flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.detail-card .dc-keypill .dc-copy {
+  background: none; border: 1px solid var(--border); border-radius: var(--r-sm);
+  color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 8px;
+}
+.detail-card .dc-tiles {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;
+}
+.detail-card .dc-tile {
+  background: var(--muted-bg); border-radius: var(--r-md); padding: 10px;
+}
+.detail-card .dc-tile .dc-tk { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; }
+.detail-card .dc-tile .dc-tv { font-size: 18px; font-weight: 700; line-height: 1.2; }
+.detail-card .dc-tile .dc-ts { font-size: 10px; color: var(--muted); }
+.detail-card .dc-prog { height: 4px; border-radius: var(--r-full); background: var(--muted-bg); overflow: hidden; margin-bottom: 4px; }
+.detail-card .dc-prog > span { display: block; height: 100%; background: var(--accent); }
+.detail-card .dc-progcap { text-align: center; font-size: 11px; color: var(--muted); }
+
+/* .mmodels: model accordion on key-detail mobile. */
+.mmodels { display: flex; flex-direction: column; gap: 8px; }
+.mmodels .mm-row {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 12px;
+}
+.mmodels .mm-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.mmodels .mm-name { font-weight: 600; font-size: 14px; }
+.mmodels .mm-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 2px 8px; border-radius: var(--r-full);
+  background: var(--muted-bg); color: var(--muted);
+}
+.mmodels .mm-badge.per_call { color: var(--accent); background: var(--accent-soft); }
+.mmodels .mm-target {
+  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
+  font-size: 12px; color: var(--muted); margin-bottom: 4px;
+}
+.mmodels .mm-price {
+  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
+  font-size: 11px; color: var(--muted);
+}
+.mmodels .mm-price.per_call { color: var(--accent); }
+
+/* .section-label: uppercase tracked section headers. */
+.section-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  color: var(--muted); text-transform: uppercase;
+  margin: 16px 0 10px;
+}
+
+/* .sechead: section header row with optional chevron. */
+.sechead { display: flex; justify-content: space-between; align-items: center; margin: 16px 0 10px; }
+.sechead .sh-chevron { color: var(--muted); cursor: pointer; }
+
+/* Hide mobile-only blocks on desktop. */
+@media (min-width: 641px) {
+  .card-stack, .tabbar, .fab, .usage-hero, .bar-rank,
+  .detail-card, .mmodels, .section-label, .sechead, .seg,
+  .mobile-only { display: none !important; }
+}

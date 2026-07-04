@@ -48,7 +48,17 @@
     "deleteFailed": "Delete failed",
     "notFound": "Key not found",
     "rotated": "New key generated (rotated)",
-    "detail": "Detail"
+    "detail": "Detail",
+    "mobile": {
+      "revoke": "Revoke",
+      "swipeHint": "Swipe left to revoke",
+      "modelsSuffix": "models",
+      "tabKeys": "Keys",
+      "tabUsage": "Usage",
+      "tabNew": "New",
+      "callCount": "{{n}} calls",
+      "noLimit": "unlimited"
+    }
   },
   "edit": {
     "title": "Edit Key · {{id}}",
@@ -153,6 +163,25 @@
     "colHitRate": "Hit rate",
     "billingTokens": "tokens",
     "billingPerCall": "per call",
-    "notInConfig": "not in config"
+    "notInConfig": "not in config",
+    "mobile": {
+      "today": "Today",
+      "thisWeek": "This week",
+      "byAlias": "By alias",
+      "limit": "Limit",
+      "remaining": "Remaining",
+      "calls": "Calls",
+      "inputTok": "Input",
+      "outputTok": "Output",
+      "noLimit": "unlimited",
+      "models": "Models",
+      "todaySpend": "Today's spend",
+      "weekSpend": "This week",
+      "avgRpm": "Avg RPM",
+      "maxRpm": "RPM max",
+      "viewUsage": "View usage details",
+      "tokenMix": "Token mix",
+      "last7Days": "Last 7 days"
+    }
   }
 }

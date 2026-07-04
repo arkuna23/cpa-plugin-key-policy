@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { fetchKeyUsage } from "../api/keys";
 import type { AliasUsageEntry, KeyUsageResponse, UsageWindow } from "../types";
 import { useT } from "../i18n";
+import { MobileTabBar } from "./KeyList";
 
 // Window switch for the per-alias breakdown table: each alias row has its own
 // daily and rolling-weekly window, and the user toggles which one all rows
@@ -82,6 +83,15 @@ export default function KeyUsage() {
 
   const windowOf = (a: AliasUsageEntry): UsageWindow => (win === "daily" ? a.daily : a.weekly);
 
+  // Mobile hero totals: sum across aliases for the active window.
+  const heroUsd = aliases.reduce((s, a) => s + (windowOf(a).total_usd ?? 0), 0);
+  const heroCalls = aliases.reduce((s, a) => s + (windowOf(a).call_count ?? 0), 0);
+  const heroInput = aliases.reduce((s, a) => s + (windowOf(a).input_tokens ?? 0), 0);
+  const heroOutput = aliases.reduce((s, a) => s + (windowOf(a).output_tokens ?? 0), 0);
+  const heroLimit = win === "daily" ? data.daily_limit_usd : data.weekly_limit_usd;
+  const heroPct = heroLimit > 0 ? Math.min(100, (heroUsd / heroLimit) * 100) : 0;
+  const maxAliasUsd = Math.max(1, ...aliases.map((a) => windowOf(a).total_usd ?? 0));
+
   return (
     <div>
       {/* Header: back · key id (mono) · name · daily/weekly toggle */}
@@ -93,11 +103,11 @@ export default function KeyUsage() {
           <span className="mono keyusage-id">{data.key_id}</span>
           <span className="muted">{data.key_name}</span>
         </div>
-        <div className="keyusage-toggle" role="tablist" aria-label={t("keyUsage.windowToggle")}>
+        <div className="seg" role="tablist" aria-label={t("keyUsage.windowToggle")}>
           <button
             role="tab"
             aria-selected={win === "daily"}
-            className={"btn sm " + (win === "daily" ? "primary" : "")}
+            className={"seg-btn " + (win === "daily" ? "active" : "")}
             onClick={() => setWin("daily")}
           >
             {t("keyUsage.tabDaily")}
@@ -105,7 +115,7 @@ export default function KeyUsage() {
           <button
             role="tab"
             aria-selected={win === "weekly"}
-            className={"btn sm " + (win === "weekly" ? "primary" : "")}
+            className={"seg-btn " + (win === "weekly" ? "active" : "")}
             onClick={() => setWin("weekly")}
           >
             {t("keyUsage.tabWeekly")}
@@ -113,9 +123,7 @@ export default function KeyUsage() {
         </div>
       </div>
 
-      {/* Card with the per-alias table. Empty-state hint sits above the table
-          when no alias has any recorded usage, but configured aliases are
-          still listed as zero rows (per the design spec). */}
+      {/* Desktop: card with the per-alias table (unchanged) */}
       <div className="card table-wrap">
         {!hasUsage && <div className="muted keyusage-empty">{t("keyUsage.empty")}</div>}
         <table>
@@ -165,6 +173,60 @@ export default function KeyUsage() {
           </tbody>
         </table>
       </div>
+
+      {/* Mobile: hero card + horizontal bar ranking */}
+      <div className="mobile-only">
+        <div className="usage-hero">
+          <div className="uh-label">{win === "daily" ? t("keyUsage.mobile.today") : t("keyUsage.mobile.thisWeek")}</div>
+          <div className="uh-amount">{fmtUsd(heroUsd)}<span className="uh-unit">USD</span></div>
+          <div className="uh-row">
+            <div className="uh-ring">
+              <svg width="64" height="64" viewBox="0 0 64 64">
+                <circle cx="32" cy="32" r="26" fill="none" stroke="var(--muted-bg)" strokeWidth="6" />
+                <circle cx="32" cy="32" r="26" fill="none" stroke="var(--accent)" strokeWidth="6"
+                  strokeLinecap="round"
+                  strokeDasharray={`${(heroPct / 100) * 163.36} 163.36`} />
+              </svg>
+              <span className="uh-pct">{Math.round(heroPct)}%</span>
+            </div>
+            <div className="uh-limits">
+              <div><span className="uh-lk">{t("keyUsage.mobile.limit")}</span> <span className="uh-lv">{heroLimit > 0 ? fmtUsd(heroLimit) : t("keyUsage.mobile.noLimit")}</span></div>
+              <div><span className="uh-lk">{t("keyUsage.mobile.remaining")}</span> <span className="uh-lv">{heroLimit > 0 ? fmtUsd(Math.max(0, heroLimit - heroUsd)) : "—"}</span></div>
+            </div>
+          </div>
+          <div className="uh-stats">
+            <span>{t("keyUsage.mobile.calls")} {fmtInt(heroCalls)}</span>
+            <span>{t("keyUsage.mobile.inputTok")} {fmtInt(heroInput)}</span>
+            <span>{t("keyUsage.mobile.outputTok")} {fmtInt(heroOutput)}</span>
+          </div>
+        </div>
+
+        <div className="section-label">{t("keyUsage.mobile.byAlias")}</div>
+        <div className="bar-rank">
+          {aliases.length === 0 ? (
+            <div className="muted">{t("keyUsage.noAlias")}</div>
+          ) : aliases.map((a) => {
+            const w = windowOf(a);
+            const usd = w.total_usd ?? 0;
+            const w2 = Math.max(2, (usd / maxAliasUsd) * 100);
+            const perCall = a.billing_mode === "per_call";
+            return (
+              <div key={a.alias} className={"br-row" + (a.in_config ? "" : " br-residual")}>
+                <div className="br-top">
+                  <span className="br-name">{a.alias}{!a.in_config && <span className="br-badge">!</span>}</span>
+                  <span className="br-usd">{fmtUsd(usd)}</span>
+                </div>
+                <div className="br-bar"><span style={{ width: w2 + "%" }} /></div>
+                <div className="br-cap">
+                  {a.provider || "—"} · {perCall ? t("keyUsage.billingPerCall") : t("keyUsage.billingTokens")} · {t("keys.mobile.callCount", { n: fmtInt(w.call_count ?? 0) })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <MobileTabBar active="usage" />
     </div>
   );
 }

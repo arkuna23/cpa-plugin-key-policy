@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { listKeys, patchKey } from "../api/keys";
 import type { KeyPublic } from "../types";
 import KeyForm from "../components/KeyForm";
+import { MobileTabBar } from "./KeyList";
 import { useT } from "../i18n";
 
 export default function KeyEdit() {
@@ -55,6 +56,7 @@ export default function KeyEdit() {
           nav("/keys");
         }}
       />
+      <MobileTabBar active="keys" />
     </div>
   );
 }
