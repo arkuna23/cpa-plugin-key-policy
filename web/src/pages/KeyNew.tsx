@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { createKey } from "../api/keys";
 import KeyForm from "../components/KeyForm";
 import PlainKeyModal from "../components/PlainKeyModal";
-import { MobileTabBar } from "./KeyList";
+import { MobileFormHeader, MobileTabBar } from "./KeyList";
 import { useT } from "../i18n";
 
 export default function KeyNew() {
@@ -11,9 +11,12 @@ export default function KeyNew() {
   const t = useT();
   const [plain, setPlain] = useState<string | null>(null);
 
+  const title = t("new.title");
+
   return (
-    <div>
-      <h2 style={{ marginTop: 0 }}>{t("new.title")}</h2>
+    <div className="form-page">
+      <h2 className="mobile-hidden" style={{ marginTop: 0 }}>{title}</h2>
+      <MobileFormHeader title={title} backTo="/keys" />
       <KeyForm
         submitLabel={t("new.create")}
         onCancel={() => nav("/keys")}

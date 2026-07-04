@@ -102,6 +102,12 @@ export default function KeyUsage() {
           </Link>
           <span className="mono keyusage-id">{data.key_id}</span>
           <span className="muted">{data.key_name}</span>
+          <Link
+            to={`/keys/${encodeURIComponent(data.key_id)}/edit`}
+            className="mobile-only keyusage-edit-link"
+          >
+            <button type="button" className="btn sm">{t("keys.edit")}</button>
+          </Link>
         </div>
         <div className="seg" role="tablist" aria-label={t("keyUsage.windowToggle")}>
           <button
@@ -226,7 +232,11 @@ export default function KeyUsage() {
         </div>
       </div>
 
-      <MobileTabBar active="usage" />
+      <MobileTabBar
+        active="usage"
+        showUsage
+        usagePath={`/keys/${encodeURIComponent(data.key_id)}/usage`}
+      />
     </div>
   );
 }

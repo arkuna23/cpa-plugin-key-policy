@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { listKeys, patchKey } from "../api/keys";
 import type { KeyPublic } from "../types";
 import KeyForm from "../components/KeyForm";
-import { MobileTabBar } from "./KeyList";
+import { MobileFormHeader, MobileTabBar } from "./KeyList";
 import { useT } from "../i18n";
 
 export default function KeyEdit() {
@@ -34,9 +34,12 @@ export default function KeyEdit() {
   if (loading) return <div className="muted">{t("keys.loading")}</div>;
   if (error || !key) return <div className="error">{error || t("edit.notFound")}</div>;
 
+  const title = t("edit.title", { id: key.id });
+
   return (
-    <div>
-      <h2 style={{ marginTop: 0 }}>{t("edit.title", { id: key.id })}</h2>
+    <div className="form-page">
+      <h2 className="mobile-hidden" style={{ marginTop: 0 }}>{title}</h2>
+      <MobileFormHeader title={title} backTo="/keys" />
       <KeyForm
         initial={key}
         idReadOnly

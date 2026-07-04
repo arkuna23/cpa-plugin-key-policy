@@ -313,9 +313,30 @@ function KeyCard({ k, onDelete }: { k: KeyPublic; onDelete: (id: string) => void
 
 // Mobile bottom tab bar. Active tab is highlighted with a 2px primary
 // underline. Shown only on narrow screens via .tabbar CSS. The "usage" tab
-// has no dedicated global page (usage is per-key), so on the key list it
-// navigates to the first key's usage if one exists; otherwise stays put.
-export function MobileTabBar({ active }: { active: "keys" | "usage" | "new" }) {
+// is hidden on the key list / new / edit screens (usage is per-key); it only
+// appears once the user has opened a specific key's usage page.
+// Compact top bar for mobile create/edit screens (desktop keeps the h2).
+export function MobileFormHeader({ title, backTo }: { title: string; backTo: string }) {
+  const t = useT();
+  return (
+    <div className="mobile-form-header mobile-only">
+      <Link to={backTo} className="mfb-back">
+        {t("keyUsage.back")}
+      </Link>
+      <h2 className="mfb-title">{title}</h2>
+    </div>
+  );
+}
+
+export function MobileTabBar({
+  active,
+  showUsage = false,
+  usagePath = "/keys",
+}: {
+  active: "keys" | "usage" | "new";
+  showUsage?: boolean;
+  usagePath?: string;
+}) {
   const t = useT();
   const nav = useNavigate();
   const tab = (id: "keys" | "usage" | "new", label: string, icon: string, target: string) => (
@@ -328,9 +349,9 @@ export function MobileTabBar({ active }: { active: "keys" | "usage" | "new" }) {
     </button>
   );
   return (
-    <nav className="tabbar">
+    <nav className={"tabbar" + (showUsage ? "" : " tabbar--no-usage")}>
       {tab("keys", t("keys.mobile.tabKeys"), "#", "/keys")}
-      {tab("usage", t("keys.mobile.tabUsage"), "#", "/keys")}
+      {showUsage && tab("usage", t("keys.mobile.tabUsage"), "#", usagePath)}
       {tab("new", t("keys.mobile.tabNew"), "+", "/keys/new")}
     </nav>
   );

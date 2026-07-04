@@ -366,6 +366,30 @@ td.strong { font-weight: 600; color: var(--text); }
   /* Desktop action rows (refresh/newKey above the table) are hidden on
      mobile — FAB + pull-to-refresh replace them. */
   .actions.mobile-hidden { display: none; }
+  .mobile-hidden { display: none !important; }
+  .mobile-only { display: block !important; }
+  a.mobile-only, .keyusage-edit-link.mobile-only { display: inline-flex !important; }
+
+  .mobile-form-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 14px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .mobile-form-header .mfb-back {
+    flex-shrink: 0; font-size: 14px; font-weight: 600;
+    color: var(--accent); text-decoration: none;
+  }
+  .mobile-form-header .mfb-title {
+    margin: 0; font-size: 17px; font-weight: 700;
+    line-height: 1.25; flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .form-page form.card { margin-top: 0; }
+
+  .keyusage-header .keyusage-idline { width: 100%; }
+  .keyusage-edit-link { margin-left: auto; }
+
+  .tabbar--no-usage .tab { flex: 1; }
 
   /* KeyForm submit row: sticky bottom on mobile so the primary action stays
      reachable without scrolling past all model rows. */
@@ -652,5 +676,5 @@ td.strong { font-weight: 600; color: var(--text); }
 @media (min-width: 641px) {
   .card-stack, .tabbar, .fab, .usage-hero, .bar-rank,
   .detail-card, .mmodels, .section-label, .sechead, .seg,
-  .mobile-only { display: none !important; }
+  .mobile-only, .mobile-form-header { display: none !important; }
 }
