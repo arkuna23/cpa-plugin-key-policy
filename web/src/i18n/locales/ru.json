@@ -106,7 +106,13 @@
     "idRequired": "id не может быть пустым",
     "submitting": "Отправка…",
     "cancel": "Отмена",
-    "submitFailed": "Ошибка отправки"
+    "submitFailed": "Ошибка отправки",
+    "mobile": {
+      "sectionBasic": "Основное",
+      "sectionLimits": "Лимиты",
+      "sectionAccess": "Доступ",
+      "sectionModels": "Модели и цены"
+    }
   },
   "picker": {
     "loading": "Загрузка доступных моделей…",

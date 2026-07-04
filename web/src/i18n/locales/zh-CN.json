@@ -106,7 +106,13 @@
     "idRequired": "id 不能为空",
     "submitting": "提交中…",
     "cancel": "取消",
-    "submitFailed": "提交失败"
+    "submitFailed": "提交失败",
+    "mobile": {
+      "sectionBasic": "基本信息",
+      "sectionLimits": "用量上限",
+      "sectionAccess": "访问",
+      "sectionModels": "模型与计价"
+    }
   },
   "picker": {
     "loading": "加载可用模型…",

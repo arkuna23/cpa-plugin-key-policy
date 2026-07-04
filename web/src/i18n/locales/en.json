@@ -106,7 +106,13 @@
     "idRequired": "id cannot be empty",
     "submitting": "Submitting…",
     "cancel": "Cancel",
-    "submitFailed": "Submit failed"
+    "submitFailed": "Submit failed",
+    "mobile": {
+      "sectionBasic": "Basic",
+      "sectionLimits": "Limits",
+      "sectionAccess": "Access",
+      "sectionModels": "Models & pricing"
+    }
   },
   "picker": {
     "loading": "Loading available models…",

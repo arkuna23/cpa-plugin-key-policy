@@ -385,6 +385,37 @@ td.strong { font-weight: 600; color: var(--text); }
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .form-page form.card { margin-top: 0; }
+  .key-form.card { background: transparent; border: none; box-shadow: none; padding: 0; }
+  .kf-section { margin-bottom: 20px; }
+  .kf-section-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--r-md); padding: 14px 16px;
+  }
+  .kf-section-card .form-row:last-child { margin-bottom: 0; }
+  .kf-hint { font-size: 12px; line-height: 1.45; margin: 8px 0 0; }
+  .kf-warn { font-size: 12px; margin: 8px 0 0; }
+  .kf-access-switch { display: flex; align-items: center; gap: 8px; }
+  .kf-model-list { display: flex; flex-direction: column; gap: 10px; }
+  .kf-model-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--r-md); overflow: hidden;
+  }
+  .kf-model-head {
+    width: 100%; display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 14px; border: none; background: none; cursor: pointer;
+    text-align: left; font-family: inherit; color: inherit;
+  }
+  .kf-model-head > div:first-child { flex: 1; min-width: 0; }
+  .kf-model-alias { font-weight: 600; font-size: 15px; }
+  .kf-model-meta { font-size: 12px; margin-top: 2px; }
+  .kf-model-target { font-size: 11px; margin-top: 4px; word-break: break-all; }
+  .kf-chevron { color: var(--muted); flex-shrink: 0; margin-top: 4px; }
+  .kf-mprice-body {
+    padding: 0 14px 14px; border-top: 1px solid var(--border);
+    background: var(--muted-bg);
+  }
+  .kf-billing-seg { margin: 12px 0; width: 100%; }
+  .kf-billing-seg .seg-btn { flex: 1; }
 
   .keyusage-header .keyusage-idline { width: 100%; }
   .keyusage-edit-link { margin-left: auto; }

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
 import type { KeyPublic, ModelRule } from "../types";
 import ModelPicker from "./ModelPicker";
 import { getPriceTable, lookupPrice, type PriceTable } from "../store/modelPrices";
@@ -89,6 +89,7 @@ export default function KeyForm({
   const [models, setModels] = useState<ModelRule[]>(initial?.models ?? []);
   const [busy, setBusy] = useState(false);
   const [localErr, setLocalErr] = useState("");
+  const [expandedPrice, setExpandedPrice] = useState<Record<string, boolean>>({});
 
   // LiteLLM price hints (community price table). Loaded once on mount, silent
   // failure: if null/inflight, the per-row "recommend" affordance simply isn't
@@ -200,8 +201,334 @@ export default function KeyForm({
     }
   };
 
+  const toggleExpanded = (key: string) => {
+    setExpandedPrice((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const renderPriceEditor = (m: ModelRule, layout: "table" | "mobile") => {
+    const key = priceKey(m);
+    const row = prices[key] ?? {
+      input_price_per_million: 0,
+      output_price_per_million: 0,
+      cache_read_price_per_million: 0,
+      billing_mode: "tokens" as const,
+      per_call_usd: 0,
+    };
+    const perCall = row.billing_mode === "per_call";
+    const hint = priceTable ? lookupPrice(priceTable, m.target_model) : null;
+
+    if (layout === "mobile") {
+      return (
+        <div className="kf-mprice-body">
+          <div className="seg kf-billing-seg" role="group" aria-label={t("keyForm.colBillingMode")}>
+            <button
+              type="button"
+              className={"seg-btn" + (perCall ? "" : " active")}
+              onClick={() => setPrice(m, "billing_mode", "tokens")}
+            >
+              {t("keyForm.billingTokens")}
+            </button>
+            <button
+              type="button"
+              className={"seg-btn" + (perCall ? " active" : "")}
+              onClick={() => setPrice(m, "billing_mode", "per_call")}
+            >
+              {t("keyForm.billingPerCall")}
+            </button>
+          </div>
+          {perCall ? (
+            <div className="form-row">
+              <label>{t("keyForm.colPerCall")}</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step="0.0001"
+                value={row.per_call_usd}
+                onChange={(e) => setPrice(m, "per_call_usd", e.target.value)}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="form-row">
+                <label>{t("keyForm.colInput")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={row.input_price_per_million}
+                  onChange={(e) => setPrice(m, "input_price_per_million", e.target.value)}
+                />
+              </div>
+              <div className="form-row">
+                <label>{t("keyForm.colOutput")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={row.output_price_per_million}
+                  onChange={(e) => setPrice(m, "output_price_per_million", e.target.value)}
+                />
+              </div>
+              <div className="form-row">
+                <label title={t("keyForm.colCacheReadHint")}>{t("keyForm.colCacheRead")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={row.cache_read_price_per_million}
+                  onChange={(e) => setPrice(m, "cache_read_price_per_million", e.target.value)}
+                />
+              </div>
+              {hint && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => recommend(m)}
+                  title={t("keyForm.recommendTitle")}
+                >
+                  {t("keyForm.recommend")}
+                </button>
+              )}
+            </>
+          )}
+          {perCall && row.per_call_usd === 0 && (
+            <p className="muted kf-warn">⚠ {t("keyForm.perCallZeroWarn")}</p>
+          )}
+          {perCall && <p className="muted kf-warn">⚠ {t("keyForm.perCallImageWarn")}</p>}
+        </div>
+      );
+    }
+
+    return (
+      <Fragment key={key}>
+        <tr>
+          <td className="mono">{m.alias}</td>
+          <td className="muted">{m.provider}</td>
+          <td className="muted">{m.group ?? "—"}</td>
+          <td>
+            <label className="switch" title={t("keyForm.billingModeTitle")}>
+              <input
+                type="checkbox"
+                checked={perCall}
+                onChange={(e) => setPrice(m, "billing_mode", e.target.checked ? "per_call" : "tokens")}
+              />
+              <span className="track"><span className="thumb" /></span>
+              <span>{perCall ? t("keyForm.billingPerCall") : t("keyForm.billingTokens")}</span>
+            </label>
+          </td>
+          {perCall ? (
+            <td colSpan={3}>
+              <div className="form-row" style={{ marginBottom: 0 }}>
+                <label>{t("keyForm.colPerCall")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="0.0001"
+                  value={row.per_call_usd}
+                  onChange={(e) => setPrice(m, "per_call_usd", e.target.value)}
+                />
+              </div>
+            </td>
+          ) : (
+            <>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={row.input_price_per_million}
+                  onChange={(e) => setPrice(m, "input_price_per_million", e.target.value)}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={row.output_price_per_million}
+                  onChange={(e) => setPrice(m, "output_price_per_million", e.target.value)}
+                />
+              </td>
+              <td>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={row.cache_read_price_per_million}
+                  onChange={(e) => setPrice(m, "cache_read_price_per_million", e.target.value)}
+                />
+              </td>
+            </>
+          )}
+          <td>
+            {!perCall && hint && (
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => recommend(m)}
+                title={t("keyForm.recommendTitle")}
+              >
+                {t("keyForm.recommend")}
+              </button>
+            )}
+          </td>
+        </tr>
+        {perCall && row.per_call_usd === 0 && (
+          <tr className="muted">
+            <td colSpan={8} style={{ fontSize: "0.85em" }}>
+              ⚠ {t("keyForm.perCallZeroWarn")}
+            </td>
+          </tr>
+        )}
+        {perCall && (
+          <tr className="muted">
+            <td colSpan={8} style={{ fontSize: "0.85em" }}>
+              ⚠ {t("keyForm.perCallImageWarn")}
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  };
+
+  const section = (title: string, children: ReactNode) => (
+    <section className="kf-section mobile-only">
+      <div className="section-label">{title}</div>
+      <div className="kf-section-card">{children}</div>
+    </section>
+  );
+
   return (
-    <form className="card" onSubmit={submit}>
+    <form className="card key-form" onSubmit={submit}>
+      <div className="mobile-only kf-sections">
+        {section(t("keyForm.mobile.sectionBasic"), (
+          <>
+            <div className="form-row">
+              <label>{t("keyForm.idLabel")}</label>
+              <input
+                className={"input" + (idReadOnly ? " mono" : "")}
+                value={id}
+                onChange={(e) => setId(e.target.value)}
+                readOnly={idReadOnly}
+                placeholder={t("keyForm.idPlaceholder")}
+                autoFocus={!idReadOnly}
+              />
+            </div>
+            <div className="form-row">
+              <label>{t("keyForm.nameLabel")}</label>
+              <input
+                className="input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t("keyForm.namePlaceholder")}
+              />
+            </div>
+            <div className="form-row kf-switch-row">
+              <label className="switch">
+                <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+                <span className="track"><span className="thumb" /></span>
+                <span>{t("keyForm.enableKey")}</span>
+              </label>
+            </div>
+            <div className="form-row">
+              <label>{t("keyForm.rpmLabel")}</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                value={rpm}
+                onChange={(e) => setRpm(parseInt(e.target.value || "0", 10) || 0)}
+              />
+            </div>
+          </>
+        ))}
+        {section(t("keyForm.mobile.sectionLimits"), (
+          <>
+            <div className="form-row">
+              <label>{t("keyForm.dailyLimitLabel")}</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step="0.01"
+                value={dailyLimit}
+                onChange={(e) => setDailyLimit(parseNum(e.target.value))}
+              />
+            </div>
+            <div className="form-row">
+              <label>{t("keyForm.weeklyLimitLabel")}</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step="0.01"
+                value={weeklyLimit}
+                onChange={(e) => setWeeklyLimit(parseNum(e.target.value))}
+              />
+            </div>
+          </>
+        ))}
+        {section(t("keyForm.mobile.sectionAccess"), (
+          <>
+            <label className="switch kf-access-switch" title={t("keyForm.allowModelsTitle")}>
+              <input type="checkbox" checked={allowModels} onChange={(e) => setAllowModels(e.target.checked)} />
+              <span className="track"><span className="thumb" /></span>
+              <span>{t("keyForm.allowModelsLabel")}</span>
+            </label>
+            <p className="muted kf-hint">{t("keyForm.allowModelsHint")}</p>
+          </>
+        ))}
+        <section className="kf-section mobile-only">
+          <div className="section-label">{t("keyForm.mobile.sectionModels")}</div>
+          <div className="form-row" style={{ marginBottom: 12 }}>
+            <ModelPicker initial={initial?.models} onChange={handleModelsChange} />
+          </div>
+          {models.length > 0 && (
+            <div className="kf-model-list">
+              {models.map((m) => {
+                const key = priceKey(m);
+                const row = prices[key];
+                const perCall = row?.billing_mode === "per_call";
+                const open = !!expandedPrice[key];
+                return (
+                  <div key={key} className="kf-model-card">
+                    <button
+                      type="button"
+                      className="kf-model-head"
+                      onClick={() => toggleExpanded(key)}
+                      aria-expanded={open}
+                    >
+                      <div>
+                        <div className="kf-model-alias">{m.alias}</div>
+                        <div className="muted kf-model-meta">
+                          {m.provider}{m.group ? ` · ${m.group}` : ""}
+                        </div>
+                        <div className="mono kf-model-target">{m.target_model}</div>
+                      </div>
+                      <span className={"mm-badge" + (perCall ? " per_call" : "")}>
+                        {perCall ? t("keyForm.billingPerCall") : t("keyForm.billingTokens")}
+                      </span>
+                      <span className="kf-chevron">{open ? "▾" : "▸"}</span>
+                    </button>
+                    {open && renderPriceEditor(m, "mobile")}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <p className="muted kf-hint" style={{ marginTop: 8 }}>{t("keyForm.priceLabel")}</p>
+        </section>
+      </div>
+
+      <div className="mobile-hidden">
       <div className="row2">
         <div className="form-row">
           <label>{t("keyForm.idLabel")}</label>
@@ -316,111 +643,13 @@ export default function KeyForm({
                 </tr>
               </thead>
               <tbody>
-                {models.map((m) => {
-                  const key = priceKey(m);
-                  const row = prices[key] ?? { input_price_per_million: 0, output_price_per_million: 0, cache_read_price_per_million: 0, billing_mode: "tokens" as const, per_call_usd: 0 };
-                  const perCall = row.billing_mode === "per_call";
-                  const hint = priceTable ? lookupPrice(priceTable, m.target_model) : null;
-                  return (
-                    <Fragment key={key}>
-                      <tr>
-                        <td className="mono">{m.alias}</td>
-                        <td className="muted">{m.provider}</td>
-                        <td className="muted">{m.group ?? "—"}</td>
-                        <td>
-                          <label className="switch" title={t("keyForm.billingModeTitle")}>
-                            <input
-                              type="checkbox"
-                              checked={perCall}
-                              onChange={(e) => setPrice(m, "billing_mode", e.target.checked ? "per_call" : "tokens")}
-                            />
-                            <span className="track"><span className="thumb" /></span>
-                            <span>{perCall ? t("keyForm.billingPerCall") : t("keyForm.billingTokens")}</span>
-                          </label>
-                        </td>
-                        {perCall ? (
-                          <td colSpan={3}>
-                            <div className="form-row" style={{ marginBottom: 0 }}>
-                              <label>{t("keyForm.colPerCall")}</label>
-                              <input
-                                className="input"
-                                type="number"
-                                min={0}
-                                step="0.0001"
-                                value={row.per_call_usd}
-                                onChange={(e) => setPrice(m, "per_call_usd", e.target.value)}
-                              />
-                            </div>
-                          </td>
-                        ) : (
-                          <>
-                            <td>
-                              <input
-                                className="input"
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={row.input_price_per_million}
-                                onChange={(e) => setPrice(m, "input_price_per_million", e.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                className="input"
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={row.output_price_per_million}
-                                onChange={(e) => setPrice(m, "output_price_per_million", e.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                className="input"
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={row.cache_read_price_per_million}
-                                onChange={(e) => setPrice(m, "cache_read_price_per_million", e.target.value)}
-                              />
-                            </td>
-                          </>
-                        )}
-                        <td>
-                          {!perCall && hint && (
-                            <button
-                              type="button"
-                              className="btn sm"
-                              onClick={() => recommend(m)}
-                              title={t("keyForm.recommendTitle")}
-                            >
-                              {t("keyForm.recommend")}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                      {perCall && row.per_call_usd === 0 && (
-                        <tr className="muted">
-                          <td colSpan={8} style={{ fontSize: "0.85em" }}>
-                            ⚠ {t("keyForm.perCallZeroWarn")}
-                          </td>
-                        </tr>
-                      )}
-                      {perCall && (
-                        <tr className="muted">
-                          <td colSpan={8} style={{ fontSize: "0.85em" }}>
-                            ⚠ {t("keyForm.perCallImageWarn")}
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
+                {models.map((m) => renderPriceEditor(m, "table"))}
               </tbody>
             </table>
           </div>
         </div>
       )}
+      </div>
 
       {(localErr || error) && <div className="error">{localErr || error}</div>}
 
