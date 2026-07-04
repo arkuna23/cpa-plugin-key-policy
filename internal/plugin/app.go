@@ -1,18 +1,22 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"cpa-key-policy/internal/plugin/web"
 	"cpa-key-policy/internal/policy"
+	"cpa-key-policy/internal/sidecar"
 )
 
 type App struct {
-	store *policy.Store
+	store   *policy.Store
+	sidecar *sidecar.Server
 }
 
 func NewApp() *App {
@@ -60,11 +64,57 @@ func (a *App) configure(raw []byte) error {
 	if err != nil {
 		return err
 	}
+	if err := a.restartSidecar(cfg); err != nil {
+		return err
+	}
 	if err := a.store.Configure(cfg); err != nil {
 		return err
 	}
-	// (Re)start the periodic usage-ledger flusher for the configured state path.
 	a.store.StartUsageFlusher()
+	if err := a.startSidecar(cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Shutdown stops the optional sidecar and flushes usage. Host calls this on unload.
+func (a *App) Shutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if a.sidecar != nil {
+		_ = a.sidecar.Stop(ctx)
+		a.sidecar = nil
+	}
+	a.store.FlushUsage()
+}
+
+func (a *App) restartSidecar(_ policy.Config) error {
+	if a.sidecar == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.sidecar.Stop(ctx); err != nil {
+		return err
+	}
+	a.sidecar = nil
+	return nil
+}
+
+func (a *App) startSidecar(cfg policy.Config) error {
+	sc := sidecar.Config{
+		Enabled:  cfg.Sidecar.Enabled,
+		Listen:   cfg.Sidecar.Listen,
+		Upstream: cfg.Sidecar.Upstream,
+	}
+	if !sc.Enabled {
+		return nil
+	}
+	srv := sidecar.New(sc, a.store)
+	if err := srv.Start(); err != nil {
+		return err
+	}
+	a.sidecar = srv
 	return nil
 }
 
@@ -80,6 +130,7 @@ func (a *App) registration() Registration {
 				{Name: "enabled", Type: "boolean", Description: "Enable or disable this plugin without unloading it."},
 				{Name: "state_file", Type: "string", Description: "JSON state file used for key policy changes made through the Management API."},
 				{Name: "keys", Type: "array", Description: "Initial downstream key policy list. State file wins after it exists."},
+				{Name: "sidecar", Type: "object", Description: "Optional HTTP listener that proxies CPA and filters GET /v1/models per key aliases (enabled, listen, upstream)."},
 			},
 		},
 		Capabilities: Capabilities{

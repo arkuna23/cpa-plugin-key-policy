@@ -106,7 +106,23 @@ Known plugin key:
 
 - allowed alias: request authenticates, routes to configured provider/model, and counts toward RPM.
 - disallowed alias: frontend auth returns unauthenticated, which usually surfaces as an auth failure.
-- `/v1/models`: frontend auth returns unauthenticated to avoid exposing CPA's full model list.
+- `/v1/models` on CPA's main port: per-key `allow_models_endpoint` is binary (401 or full global list). CPA cannot filter the list per downstream key on that port.
+
+### Optional sidecar (filtered `/v1/models`)
+
+When `sidecar.enabled` is true in plugin config, the plugin listens on `sidecar.listen` (default `127.0.0.1:19090`) and reverse-proxies to `sidecar.upstream` (your CPA base URL, e.g. `http://127.0.0.1:8317`). Clients point their OpenAI SDK at the sidecar instead of CPA directly.
+
+- `GET /v1/models` (and compatible paths): authenticated with the same downstream `cpa_…` keys; response `data[].id` is filtered to that key's configured **aliases**.
+- Other routes: proxied to CPA after the same plugin auth/RPM/limits as frontend auth.
+
+Example YAML snippet:
+
+```yaml
+sidecar:
+  enabled: true
+  listen: 127.0.0.1:19090
+  upstream: http://127.0.0.1:8317
+```
 
 Unknown key:
 

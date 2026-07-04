@@ -474,6 +474,12 @@ func (s *Store) AliasUsageFor(keyID string) (KeyConfig, []AliasUsageEntry, bool)
 	return *key, s.usage.AliasUsage(*key), true
 }
 
+// FindByAPIKey resolves a downstream plain key to policy (copy). Used by the
+// optional models-list sidecar. Returns nil when unknown.
+func (s *Store) FindByAPIKey(raw string) *KeyConfig {
+	return s.findBySecret(raw)
+}
+
 func (s *Store) findBySecret(raw string) *KeyConfig {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

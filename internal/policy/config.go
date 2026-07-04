@@ -17,6 +17,15 @@ type Config struct {
 	Enabled   bool        `yaml:"enabled" json:"enabled"`
 	StateFile string      `yaml:"state_file" json:"state_file"`
 	Keys      []KeyConfig `yaml:"keys" json:"keys"`
+	// Sidecar optionally listens on Listen and reverse-proxies to Upstream (CPA).
+	// GET /v1/models is filtered to the downstream key's configured aliases.
+	Sidecar SidecarConfig `yaml:"sidecar,omitempty" json:"sidecar,omitempty"`
+}
+
+type SidecarConfig struct {
+	Enabled  bool   `yaml:"enabled" json:"enabled"`
+	Listen   string `yaml:"listen,omitempty" json:"listen,omitempty"`     // default 127.0.0.1:19090
+	Upstream string `yaml:"upstream,omitempty" json:"upstream,omitempty"` // e.g. http://127.0.0.1:8317
 }
 
 type KeyConfig struct {
