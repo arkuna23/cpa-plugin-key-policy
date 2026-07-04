@@ -82,6 +82,7 @@
     "allowModelsLabel": "允許存取 /v1/models",
     "allowModelsTitle": "因 CPA 上游限制，插件無法按 key 過濾模型列表，只能整體放行或 401",
     "allowModelsHint": "CPA 上游無法按下游 key 過濾模型列表，故此處只能二選：放行（看到全局所有模型）或 401（隱藏列表）。",
+    "sidecarModelsHint": "已啟用 sidecar（{{listen}}）。請將客戶端指向該位址；GET /v1/models 將依本 key 的模型別名過濾，無需再設定「允許 /v1/models」。",
     "modelsLabel": "允許的模型（多選，別名自動 = 模型名）",
     "priceLabel": "模型單價（美元 / 每百萬 token；留 0 = 不計費）",
     "colAlias": "別名",

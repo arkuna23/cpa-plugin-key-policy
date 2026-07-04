@@ -138,4 +138,5 @@ export interface StatusResponse {
   state_file: string;
   key_count: number;
   rpm_usage?: Record<string, unknown>;
+  sidecar?: { enabled: boolean; listen?: string };
 }

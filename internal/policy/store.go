@@ -20,6 +20,9 @@ type Store struct {
 	usage     *usageLedger
 	// flusher for periodically persisting the usage ledger to the state file.
 	flusher *usageFlusher
+	// Sidecar flags from last Configure (for management /status and UI).
+	sidecarEnabled bool
+	sidecarListen  string
 }
 
 type AuthDecision struct {
@@ -131,6 +134,11 @@ func (s *Store) Configure(cfg Config) error {
 	}
 	s.enabled = cfg.Enabled
 	s.statePath = statePath
+	s.sidecarEnabled = cfg.Sidecar.Enabled
+	s.sidecarListen = strings.TrimSpace(cfg.Sidecar.Listen)
+	if s.sidecarEnabled && s.sidecarListen == "" {
+		s.sidecarListen = "127.0.0.1:19090"
+	}
 	s.keys = next
 	if s.limiter == nil {
 		s.limiter = NewRateLimiter()
@@ -735,14 +743,23 @@ func (s *Store) Status() map[string]any {
 	enabled := s.enabled
 	statePath := s.statePath
 	keyCount := len(s.keys)
+	sidecarOn := s.sidecarEnabled
+	sidecarListen := s.sidecarListen
 	s.mu.RUnlock()
-	return map[string]any{
+	out := map[string]any{
 		"enabled":    enabled,
 		"state_file": statePath,
 		"key_count":  keyCount,
 		"rpm_usage":  s.limiter.Snapshot(),
 		"usage":      s.usageUsageLocked(),
 	}
+	if sidecarOn {
+		out["sidecar"] = map[string]any{
+			"enabled": true,
+			"listen":  sidecarListen,
+		}
+	}
+	return out
 }
 
 // usageUsageLocked returns a summary map of all keys' usage (for status).

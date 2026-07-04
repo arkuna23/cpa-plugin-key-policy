@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
+import { getPluginStatus } from "../store/pluginStatus";
 import type { KeyPublic, ModelRule } from "../types";
 import ModelPicker from "./ModelPicker";
 import { getPriceTable, lookupPrice, type PriceTable } from "../store/modelPrices";
@@ -15,7 +16,7 @@ export interface KeyFormValues {
   // Per-key override for GET /v1/models. CPA cannot filter the model list per
   // downstream key, so the only plugin-enforceable choice is binary: 401 (hide
   // the list) or allow (client sees the full global list). Default false.
-  allow_models_endpoint: boolean;
+  allow_models_endpoint?: boolean;
 }
 
 interface Props {
@@ -71,7 +72,21 @@ export default function KeyForm({
   const [dailyLimit, setDailyLimit] = useState(initial?.daily_limit_usd ?? 0);
   const [weeklyLimit, setWeeklyLimit] = useState(initial?.weekly_limit_usd ?? 0);
   const [allowModels, setAllowModels] = useState<boolean>(initial?.allow_models_endpoint ?? false);
+  const [sidecarActive, setSidecarActive] = useState(false);
+  const [sidecarListen, setSidecarListen] = useState("");
   const t = useT();
+
+  useEffect(() => {
+    let alive = true;
+    void getPluginStatus().then((st) => {
+      if (!alive) return;
+      if (st.sidecar?.enabled) {
+        setSidecarActive(true);
+        setSidecarListen(st.sidecar.listen ?? "");
+      }
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   // Pricing table keyed by alias (lowercased) so it survives picker re-emits.
   const [prices, setPrices] = useState<Record<string, PriceRow>>(() => {
     const out: Record<string, PriceRow> = {};
@@ -191,7 +206,7 @@ export default function KeyForm({
         models: pricedModels,
         daily_limit_usd: dailyLimit,
         weekly_limit_usd: weeklyLimit,
-        allow_models_endpoint: allowModels,
+        ...(sidecarActive ? {} : { allow_models_endpoint: allowModels }),
       });
     } catch (err) {
       const e = err as { response?: { data?: { error?: { message?: string } } }; message?: string };
@@ -476,7 +491,16 @@ export default function KeyForm({
             </div>
           </>
         ))}
-        {section(t("keyForm.mobile.sectionAccess"), (
+        {sidecarActive ? (
+          <section className="kf-section mobile-only">
+            <div className="section-label">{t("keyForm.mobile.sectionAccess")}</div>
+            <div className="kf-section-card">
+              <p className="muted kf-hint" style={{ margin: 0 }}>
+                {t("keyForm.sidecarModelsHint", { listen: sidecarListen || "—" })}
+              </p>
+            </div>
+          </section>
+        ) : section(t("keyForm.mobile.sectionAccess"), (
           <>
             <label className="switch kf-access-switch" title={t("keyForm.allowModelsTitle")}>
               <input type="checkbox" checked={allowModels} onChange={(e) => setAllowModels(e.target.checked)} />
@@ -601,20 +625,28 @@ export default function KeyForm({
         </div>
       </div>
 
-      <div className="form-row">
-        <label className="switch" title={t("keyForm.allowModelsTitle")}>
-          <input
-            type="checkbox"
-            checked={allowModels}
-            onChange={(e) => setAllowModels(e.target.checked)}
-          />
-          <span className="track"><span className="thumb" /></span>
-          <span>{t("keyForm.allowModelsLabel")}</span>
-        </label>
-        <span className="muted" style={{ fontSize: "0.85em", marginLeft: 8 }}>
-          {t("keyForm.allowModelsHint")}
-        </span>
-      </div>
+      {sidecarActive ? (
+        <div className="form-row">
+          <p className="muted" style={{ margin: 0, fontSize: "0.9em" }}>
+            {t("keyForm.sidecarModelsHint", { listen: sidecarListen || "—" })}
+          </p>
+        </div>
+      ) : (
+        <div className="form-row">
+          <label className="switch" title={t("keyForm.allowModelsTitle")}>
+            <input
+              type="checkbox"
+              checked={allowModels}
+              onChange={(e) => setAllowModels(e.target.checked)}
+            />
+            <span className="track"><span className="thumb" /></span>
+            <span>{t("keyForm.allowModelsLabel")}</span>
+          </label>
+          <span className="muted" style={{ fontSize: "0.85em", marginLeft: 8 }}>
+            {t("keyForm.allowModelsHint")}
+          </span>
+        </div>
+      )}
 
       <div className="form-row">
         <label>{t("keyForm.modelsLabel")}</label>
