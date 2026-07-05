@@ -23,9 +23,10 @@ type Config struct {
 }
 
 type SidecarConfig struct {
-	Enabled  bool   `yaml:"enabled" json:"enabled"`
-	Listen   string `yaml:"listen,omitempty" json:"listen,omitempty"`     // default 127.0.0.1:19090
-	Upstream string `yaml:"upstream,omitempty" json:"upstream,omitempty"` // e.g. http://127.0.0.1:8317
+	Enabled      bool   `yaml:"enabled" json:"enabled"`
+	Listen       string `yaml:"listen,omitempty" json:"listen,omitempty"`                 // default 127.0.0.1:19090
+	Upstream     string `yaml:"upstream,omitempty" json:"upstream,omitempty"`             // e.g. http://127.0.0.1:8317
+	ModelsAPIKey string `yaml:"models_api_key,omitempty" json:"models_api_key,omitempty"` // upstream key used only to fetch the global /v1/models list
 }
 
 type KeyConfig struct {

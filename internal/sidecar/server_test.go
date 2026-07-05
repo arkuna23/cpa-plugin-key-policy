@@ -1,11 +1,15 @@
 package sidecar
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"cpa-key-policy/internal/policy"
@@ -16,6 +20,15 @@ func TestServerModelsFiltered(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			http.NotFound(w, r)
 			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer cpa_admin_models_key" {
+			t.Fatalf("upstream auth = %q, want models key", got)
+		}
+		if got := r.URL.Query().Get("api_key"); got != "" {
+			t.Fatalf("upstream api_key query leaked: %q", got)
+		}
+		if got := r.URL.Query().Get("client_version"); got != "test-client" {
+			t.Fatalf("client_version = %q, want preserved", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"allowed-a"},{"id":"blocked"}]}`))
@@ -28,7 +41,8 @@ func TestServerModelsFiltered(t *testing.T) {
 	}
 	store := policy.NewStore()
 	if err := store.Configure(policy.Config{
-		Enabled: true,
+		Enabled:   true,
+		StateFile: filepath.Join(t.TempDir(), "state.json"),
 		Keys: []policy.KeyConfig{{
 			ID: "k1", Enabled: true, KeyHash: hash,
 			Models: []policy.ModelRule{{Alias: "allowed-a", Provider: "openai", TargetModel: "gpt"}},
@@ -37,7 +51,7 @@ func TestServerModelsFiltered(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := New(Config{Enabled: true, Listen: "127.0.0.1:0", Upstream: up.URL}, store)
+	srv := New(Config{Enabled: true, Listen: "127.0.0.1:0", Upstream: up.URL, ModelsAPIKey: "cpa_admin_models_key"}, store)
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -47,8 +61,7 @@ func TestServerModelsFiltered(t *testing.T) {
 	}
 	defer func() { _ = srv.Stop(context.Background()) }()
 
-	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/models", nil)
-	req.Header.Set("Authorization", "Bearer cpa_test_secret_key_12345")
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/models?api_key=cpa_test_secret_key_12345&client_version=test-client", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -71,13 +84,67 @@ func TestServerModelsFiltered(t *testing.T) {
 	}
 }
 
+func TestServerModelsFiltersGzipUpstream(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		_, _ = zw.Write([]byte(`{"object":"list","data":[{"id":"allowed"},{"id":"blocked"}]}`))
+		_ = zw.Close()
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(buf.Bytes())
+	}))
+	defer up.Close()
+
+	hash, err := policy.HashKey("cpa_test_secret_key_12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := policy.NewStore()
+	if err := store.Configure(policy.Config{
+		Enabled:   true,
+		StateFile: filepath.Join(t.TempDir(), "state.json"),
+		Keys: []policy.KeyConfig{{
+			ID: "k1", Enabled: true, KeyHash: hash,
+			Models: []policy.ModelRule{{Alias: "allowed", Provider: "openai", TargetModel: "gpt"}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := New(Config{Enabled: true, Listen: "127.0.0.1:0", Upstream: up.URL}, store)
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Stop(context.Background()) }()
+
+	req, _ := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer cpa_test_secret_key_12345")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body %s", resp.StatusCode, body)
+	}
+	var list openAIModelsList
+	if err := json.Unmarshal(body, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data) != 1 || list.Data[0]["id"] != "allowed" {
+		t.Fatalf("unexpected filtered list: %v", list.Data)
+	}
+}
+
 func TestServerModelsUnauthorized(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer up.Close()
 	store := policy.NewStore()
-	_ = store.Configure(policy.Config{Enabled: true})
+	_ = store.Configure(policy.Config{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state.json")})
 
 	srv := New(Config{Enabled: true, Listen: "127.0.0.1:0", Upstream: up.URL}, store)
 	if err := srv.Start(); err != nil {
@@ -93,5 +160,40 @@ func TestServerModelsUnauthorized(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("want 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestServerNonModelsRequestProxiesWithoutLocalAuth(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer downstream" {
+			t.Fatalf("authorization = %q, want downstream key", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer up.Close()
+
+	store := policy.NewStore()
+	_ = store.Configure(policy.Config{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state.json")})
+	srv := New(Config{Enabled: true, Listen: "127.0.0.1:0", Upstream: up.URL}, store)
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Stop(context.Background()) }()
+
+	req, _ := http.NewRequest(http.MethodPost, "http://"+srv.Addr()+"/v1/chat/completions", strings.NewReader(`{"model":"fast"}`))
+	req.Header.Set("Authorization", "Bearer downstream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status %d body %s", resp.StatusCode, body)
 	}
 }

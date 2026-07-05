@@ -1,6 +1,8 @@
 package sidecar
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -18,9 +20,10 @@ import (
 // Config drives the optional HTTP sidecar that proxies CPA and filters
 // GET /v1/models per downstream key aliases.
 type Config struct {
-	Enabled  bool
-	Listen   string // e.g. 127.0.0.1:19090
-	Upstream string // e.g. http://127.0.0.1:8317
+	Enabled      bool
+	Listen       string // e.g. 127.0.0.1:19090
+	Upstream     string // e.g. http://127.0.0.1:8317
+	ModelsAPIKey string // upstream key used only for fetching the global models list
 }
 
 // Server runs the sidecar listener until Stop.
@@ -74,11 +77,9 @@ func (s *Server) Start() error {
 			s.handleModels(w, r, up)
 			return
 		}
-		decision := s.store.Authenticate(r.Method, path, r.Header, r.URL.Query(), nil)
-		if !decision.Known || !decision.Allowed {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
+		// Let CPA's normal auth/plugin chain handle non-model requests. Calling
+		// Store.Authenticate here would pre-consume RPM/cost gates and then CPA
+		// would authenticate the same downstream key again after proxying.
 		proxy.ServeHTTP(w, r)
 	})
 
@@ -141,13 +142,13 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request, up *url.UR
 
 	upURL := *up
 	upURL.Path = r.URL.Path
-	upURL.RawQuery = r.URL.RawQuery
+	upURL.RawQuery = modelListRawQuery(r.URL.Query(), s.cfg.ModelsAPIKey)
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upURL.String(), nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	copyHeaders(req.Header, r.Header)
+	copyModelListHeaders(req.Header, r.Header, s.cfg.ModelsAPIKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -171,6 +172,11 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request, up *url.UR
 		return
 	}
 
+	body, err = decodeResponseBody(resp.Header, body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
 	filtered, err := FilterModelsResponse(body, aliases)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -181,13 +187,49 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request, up *url.UR
 	_, _ = w.Write(filtered)
 }
 
-func copyHeaders(dst, src http.Header) {
+func copyModelListHeaders(dst, src http.Header, modelsAPIKey string) {
 	for k, vv := range src {
-		if strings.EqualFold(k, "Host") {
+		if strings.EqualFold(k, "Host") || strings.EqualFold(k, "Accept-Encoding") {
+			continue
+		}
+		if strings.TrimSpace(modelsAPIKey) != "" && isAuthHeader(k) {
 			continue
 		}
 		for _, v := range vv {
 			dst.Add(k, v)
 		}
 	}
+	dst.Set("Accept-Encoding", "identity")
+	if key := strings.TrimSpace(modelsAPIKey); key != "" {
+		dst.Set("Authorization", "Bearer "+key)
+	}
+}
+
+func modelListRawQuery(query url.Values, modelsAPIKey string) string {
+	if strings.TrimSpace(modelsAPIKey) != "" {
+		query.Del("api_key")
+		query.Del("key")
+	}
+	return query.Encode()
+}
+
+func isAuthHeader(name string) bool {
+	for _, candidate := range []string{"Authorization", "X-API-Key", "api-key", "x-api-key", "x-goog-api-key"} {
+		if strings.EqualFold(name, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeResponseBody(headers http.Header, body []byte) ([]byte, error) {
+	if !strings.EqualFold(strings.TrimSpace(headers.Get("Content-Encoding")), "gzip") {
+		return body, nil
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	return io.ReadAll(io.LimitReader(zr, 32<<20))
 }

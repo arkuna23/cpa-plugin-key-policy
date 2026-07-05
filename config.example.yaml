@@ -6,6 +6,13 @@ plugins:
       enabled: true
       priority: 10
       state_file: "cpa-key-policy-state.json"
+      sidecar:
+        enabled: false
+        listen: "127.0.0.1:19090"
+        upstream: "http://127.0.0.1:8317"
+        # Strongly recommended: a CPA key that can read the global /v1/models
+        # list on the upstream. Downstream cpa_ keys still control client access.
+        models_api_key: "replace-with-cpa-api-key-that-can-list-models"
       keys:
         - id: "team-a"
           name: "Team A"
@@ -20,4 +27,3 @@ plugins:
             - alias: "sonnet"
               provider: "claude"
               target_model: "claude-sonnet-4-5-20250929"
-

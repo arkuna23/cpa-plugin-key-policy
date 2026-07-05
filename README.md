@@ -112,8 +112,16 @@ Known plugin key:
 
 When `sidecar.enabled` is true in plugin config, the plugin listens on `sidecar.listen` (default `127.0.0.1:19090`) and reverse-proxies to `sidecar.upstream` (your CPA base URL, e.g. `http://127.0.0.1:8317`). Clients point their OpenAI SDK at the sidecar instead of CPA directly.
 
-- `GET /v1/models` (and compatible paths): authenticated with the same downstream `cpa_…` keys; response `data[].id` is filtered to that key's configured **aliases**.
-- Other routes: proxied to CPA after the same plugin auth/RPM/limits as frontend auth.
+How to enable it:
+
+1. Pick or create an upstream CPA API key that can call CPA's global `GET /v1/models` on `sidecar.upstream`.
+2. Put that key in `sidecar.models_api_key`. This key is used only by the sidecar itself when fetching the upstream model catalog.
+3. Keep giving end users the plugin-issued downstream `cpa_...` keys. The sidecar authenticates those downstream keys for `GET /v1/models`, filters the upstream catalog to that key's aliases, and returns the filtered list.
+4. Point clients at `http://<sidecar.listen>` instead of the CPA main port. For example, if `listen` is `127.0.0.1:19090`, set OpenAI-compatible `base_url` to `http://127.0.0.1:19090/v1` (or the equivalent base URL setting for your client).
+
+- `GET /v1/models` (and compatible paths): authenticated with the same downstream `cpa_…` keys; OpenAI/Claude `data[].id` responses and Codex-client `models[].slug` responses are filtered to that key's configured **aliases**.
+- Other routes: proxied directly to CPA. CPA's normal auth/plugin chain still applies, so RPM, model routing, usage limits, and billing remain enforced once on the upstream request.
+- If `models_api_key` is omitted, the sidecar forwards the downstream key to upstream for the catalog request. That only works when the downstream key is also allowed to read `/v1/models` on CPA's main port; otherwise upstream returns 401 before filtering. For filtered model lists, configure `models_api_key`.
 
 Example YAML snippet:
 
@@ -122,6 +130,7 @@ sidecar:
   enabled: true
   listen: 127.0.0.1:19090
   upstream: http://127.0.0.1:8317
+  models_api_key: "replace-with-cpa-api-key-that-can-list-models"
 ```
 
 Unknown key:

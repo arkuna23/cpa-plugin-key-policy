@@ -21,8 +21,9 @@ type Store struct {
 	// flusher for periodically persisting the usage ledger to the state file.
 	flusher *usageFlusher
 	// Sidecar flags from last Configure (for management /status and UI).
-	sidecarEnabled bool
-	sidecarListen  string
+	sidecarEnabled    bool
+	sidecarListen     string
+	sidecarModelsAuth bool
 }
 
 type AuthDecision struct {
@@ -136,6 +137,7 @@ func (s *Store) Configure(cfg Config) error {
 	s.statePath = statePath
 	s.sidecarEnabled = cfg.Sidecar.Enabled
 	s.sidecarListen = strings.TrimSpace(cfg.Sidecar.Listen)
+	s.sidecarModelsAuth = strings.TrimSpace(cfg.Sidecar.ModelsAPIKey) != ""
 	if s.sidecarEnabled && s.sidecarListen == "" {
 		s.sidecarListen = "127.0.0.1:19090"
 	}
@@ -745,6 +747,7 @@ func (s *Store) Status() map[string]any {
 	keyCount := len(s.keys)
 	sidecarOn := s.sidecarEnabled
 	sidecarListen := s.sidecarListen
+	sidecarModelsAuth := s.sidecarModelsAuth
 	s.mu.RUnlock()
 	out := map[string]any{
 		"enabled":    enabled,
@@ -755,8 +758,9 @@ func (s *Store) Status() map[string]any {
 	}
 	if sidecarOn {
 		out["sidecar"] = map[string]any{
-			"enabled": true,
-			"listen":  sidecarListen,
+			"enabled":              true,
+			"listen":               sidecarListen,
+			"models_upstream_auth": sidecarModelsAuth,
 		}
 	}
 	return out

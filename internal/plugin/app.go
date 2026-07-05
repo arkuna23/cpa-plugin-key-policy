@@ -103,9 +103,10 @@ func (a *App) restartSidecar(_ policy.Config) error {
 
 func (a *App) startSidecar(cfg policy.Config) error {
 	sc := sidecar.Config{
-		Enabled:  cfg.Sidecar.Enabled,
-		Listen:   cfg.Sidecar.Listen,
-		Upstream: cfg.Sidecar.Upstream,
+		Enabled:      cfg.Sidecar.Enabled,
+		Listen:       cfg.Sidecar.Listen,
+		Upstream:     cfg.Sidecar.Upstream,
+		ModelsAPIKey: cfg.Sidecar.ModelsAPIKey,
 	}
 	if !sc.Enabled {
 		return nil
@@ -130,7 +131,7 @@ func (a *App) registration() Registration {
 				{Name: "enabled", Type: "boolean", Description: "Enable or disable this plugin without unloading it."},
 				{Name: "state_file", Type: "string", Description: "JSON state file used for key policy changes made through the Management API."},
 				{Name: "keys", Type: "array", Description: "Initial downstream key policy list. State file wins after it exists."},
-				{Name: "sidecar", Type: "object", Description: "Optional HTTP listener that proxies CPA and filters GET /v1/models per key aliases (enabled, listen, upstream)."},
+				{Name: "sidecar", Type: "object", Description: "Optional HTTP listener that proxies CPA and filters GET /v1/models per key aliases (enabled, listen, upstream, models_api_key)."},
 			},
 		},
 		Capabilities: Capabilities{
