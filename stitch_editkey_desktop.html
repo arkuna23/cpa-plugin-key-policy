@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+
+<html class="light" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>编辑 Key - CPA 密钥管理</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=Courier+Prime&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "primary-fixed": "#e8e1da",
+                    "on-tertiary-fixed-variant": "#474649",
+                    "surface-variant": "#e6e2e0",
+                    "secondary-fixed-dim": "#c8c6c1",
+                    "inverse-primary": "#ccc5bf",
+                    "on-tertiary": "#ffffff",
+                    "on-primary-fixed-variant": "#4a4641",
+                    "surface-tint": "#625e58",
+                    "success": "#10B981",
+                    "outline-variant": "#cdc5bc",
+                    "on-tertiary-container": "#fffbff",
+                    "error-container": "#ffdad6",
+                    "tertiary-fixed-dim": "#c8c5c9",
+                    "danger": "#C65746",
+                    "page-bg": "#FAF9F5",
+                    "secondary-fixed": "#e4e2dc",
+                    "on-primary-fixed": "#1e1b17",
+                    "primary": "#5f5b56",
+                    "inverse-on-surface": "#f4f0ee",
+                    "on-primary-container": "#fffbff",
+                    "text-muted": "#6D6760",
+                    "surface-container-high": "#ebe7e6",
+                    "warning": "#E0AA14",
+                    "secondary-container": "#e4e2dc",
+                    "outline": "#7c766e",
+                    "secondary": "#5f5f5a",
+                    "primary-container": "#78746e",
+                    "on-secondary": "#ffffff",
+                    "tertiary-fixed": "#e5e1e5",
+                    "background": "#fdf8f7",
+                    "text-primary": "#2D2A26",
+                    "surface": "#FFFFFF",
+                    "border-strong": "#D5D2CB",
+                    "on-secondary-container": "#656560",
+                    "error": "#ba1a1a",
+                    "surface-container-low": "#f7f3f1",
+                    "on-error-container": "#93000a",
+                    "tertiary": "#5d5b5e",
+                    "surface-dim": "#ddd9d8",
+                    "on-secondary-fixed": "#1b1c18",
+                    "on-primary": "#ffffff",
+                    "on-surface-variant": "#4b463f",
+                    "primary-fixed-dim": "#ccc5bf",
+                    "surface-container-highest": "#e6e2e0",
+                    "tertiary-container": "#767477",
+                    "on-secondary-fixed-variant": "#474743",
+                    "surface-container": "#f1edeb",
+                    "on-background": "#1c1b1b",
+                    "border": "#E3E1DB",
+                    "on-surface": "#1c1b1b",
+                    "on-error": "#ffffff",
+                    "on-tertiary-fixed": "#1c1b1e",
+                    "surface-container-lowest": "#ffffff",
+                    "inverse-surface": "#31302f",
+                    "surface-bright": "#fdf8f7"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "grid-gap": "16px",
+                    "card-padding": "24px",
+                    "page-max-width": "1200px",
+                    "gutter": "1rem",
+                    "page-padding": "24px"
+            },
+            "fontFamily": {
+                    "section-label": ["Inter"],
+                    "card-secondary-mono": ["Courier Prime"],
+                    "nav-subtitle": ["Inter"],
+                    "card-title": ["Inter"],
+                    "nav-title": ["Inter"],
+                    "body": ["Inter"]
+            },
+            "fontSize": {
+                    "section-label": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                    "card-secondary-mono": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                    "nav-subtitle": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                    "card-title": ["15px", {"lineHeight": "20px", "fontWeight": "600"}],
+                    "nav-title": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                    "body": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #FAF9F5;
+            color: #2D2A26;
+            -webkit-font-smoothing: antialiased;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+            font-size: 18px;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #8B8680;
+        }
+        .toggle-checkbox:checked + .toggle-label::after {
+            transform: translateX(1.25rem);
+        }
+        input:focus {
+            outline: none;
+            border-color: #8B8680 !important;
+            box-shadow: 0 0 0 4px rgba(139, 134, 128, 0.18);
+        }
+    </style>
+</head>
+<body class="font-body text-body min-h-screen">
+<!-- TopNavBar -->
+<nav class="bg-surface border-b border-border fixed top-0 w-full z-50">
+<div class="flex justify-between items-center h-14 w-full px-page-padding max-w-[1200px] mx-auto">
+<div class="flex flex-col">
+<span class="font-nav-title text-nav-title text-text-primary font-bold">CPA 密钥管理</span>
+<span class="font-nav-subtitle text-nav-subtitle text-text-muted">https://api.example.com</span>
+</div>
+<div class="flex items-center gap-6">
+<div class="hidden md:flex items-center gap-6">
+<a class="font-body text-body text-text-muted hover:text-primary transition-colors" href="#">密钥列表</a>
+<a class="bg-[#8B8680] text-white px-4 py-1.5 rounded text-sm font-semibold hover:opacity-90 transition-all active:scale-95" href="#">新建密钥</a>
+</div>
+<div class="h-4 w-[1px] bg-border mx-2"></div>
+<button class="font-body text-body text-text-muted hover:text-primary transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined">logout</span>
+                    退出登录
+                </button>
+</div>
+</div>
+</nav>
+<!-- Main Content -->
+<main class="pt-24 pb-20 px-page-padding max-w-[1200px] mx-auto">
+<!-- Header Section -->
+<div class="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
+<div>
+<h1 class="text-3xl font-bold tracking-tight text-text-primary mb-2">编辑 Key</h1>
+<div class="flex items-center gap-3">
+<span class="font-card-secondary-mono text-card-secondary-mono text-text-muted bg-surface-container px-2 py-0.5 rounded">team-a</span>
+<span class="text-text-muted">团队A主密钥</span>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="px-4 py-2 border border-border rounded text-sm font-semibold hover:bg-surface-container-low transition-all active:scale-98">重置RPM</button>
+<button class="px-4 py-2 border border-border rounded text-sm font-semibold hover:bg-surface-container-low transition-all active:scale-98">轮换</button>
+<button class="px-4 py-2 border border-border rounded text-sm font-semibold hover:bg-surface-container-low transition-all active:scale-98">取消</button>
+</div>
+</div>
+<!-- Form Card -->
+<div class="bg-surface border border-border rounded-[10px] p-card-padding shadow-sm mb-8">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+<!-- Field: Key ID -->
+<div class="flex flex-col gap-1.5">
+<label class="font-section-label text-section-label uppercase text-text-muted">Key ID *</label>
+<input class="bg-surface-container-low border border-border rounded px-3 py-2 font-card-secondary-mono text-card-secondary-mono text-text-muted cursor-not-allowed" readonly="" type="text" value="team-a"/>
+</div>
+<!-- Field: Name -->
+<div class="flex flex-col gap-1.5">
+<label class="font-section-label text-section-label uppercase text-text-muted">名称（可选）</label>
+<input class="bg-surface border border-border rounded px-3 py-2 font-body text-body focus:ring-2 focus:ring-[#8B8680]/20" type="text" value="团队A主密钥"/>
+</div>
+<!-- Field: RPM -->
+<div class="flex flex-col gap-1.5">
+<label class="font-section-label text-section-label uppercase text-text-muted">RPM（每分钟请求数，0 = 不限）</label>
+<input class="bg-surface border border-border rounded px-3 py-2 font-body text-body focus:ring-2 focus:ring-[#8B8680]/20" type="number" value="60"/>
+</div>
+<!-- Field: Status Toggle -->
+<div class="flex flex-col gap-1.5">
+<label class="font-section-label text-section-label uppercase text-text-muted">状态</label>
+<div class="flex items-center gap-3 py-2">
+<div class="relative inline-block w-10 h-5 align-middle select-none transition duration-200 ease-in">
+<input checked="" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer z-10 transition-transform duration-200" id="toggle_status" name="toggle" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-5 rounded-full bg-surface-container-highest cursor-pointer" for="toggle_status"></label>
+</div>
+<span class="font-body text-body">启用此 key</span>
+</div>
+</div>
+<!-- Field: Daily Limit -->
+<div class="flex flex-col gap-1.5">
+<label class="font-section-label text-section-label uppercase text-text-muted">每日用量上限（美元，0 = 不限）</label>
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted font-card-secondary-mono">$</span>
+<input class="bg-surface border border-border rounded pl-7 pr-3 py-2 w-full font-body text-body focus:ring-2 focus:ring-[#8B8680]/20" type="number" value="10"/>
+</div>
+</div>
+<!-- Field: Weekly Limit -->
+<div class="flex flex-col gap-1.5">
+<label class="font-section-label text-section-label uppercase text-text-muted">每周用量上限（美元，0 = 不限，滚动 7 天）</label>
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted font-card-secondary-mono">$</span>
+<input class="bg-surface border border-border rounded pl-7 pr-3 py-2 w-full font-body text-body focus:ring-2 focus:ring-[#8B8680]/20" type="number" value="50"/>
+</div>
+</div>
+<!-- Field: /v1/models Toggle -->
+<div class="flex flex-col gap-1.5 md:col-span-2">
+<label class="font-section-label text-section-label uppercase text-text-muted">允许访问 /v1/models</label>
+<div class="flex items-center gap-3 py-1">
+<div class="relative inline-block w-10 h-5 align-middle select-none transition duration-200 ease-in">
+<input class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer z-10 transition-transform duration-200" id="toggle_v1" name="toggle" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-5 rounded-full bg-surface-container-highest cursor-pointer" for="toggle_v1"></label>
+</div>
+<span class="font-body text-body text-text-muted text-xs">CPA 上游无法线下游 key 过滤模型列表，故此处只能二选：放行或 401。</span>
+</div>
+</div>
+<!-- Field: Allowed Models -->
+<div class="flex flex-col gap-3 md:col-span-2 pt-2">
+<label class="font-section-label text-section-label uppercase text-text-muted">允许的模型（多选，别名自动 = 模型名）</label>
+<div class="flex flex-wrap gap-2">
+<div class="flex items-center gap-2 bg-surface-container-low border border-border-strong px-3 py-1.5 rounded-full">
+<span class="font-body text-body font-medium">gpt-4o</span>
+<button class="hover:text-danger"><span class="material-symbols-outlined text-[14px]">close</span></button>
+</div>
+<div class="flex items-center gap-2 bg-surface-container-low border border-border-strong px-3 py-1.5 rounded-full">
+<span class="font-body text-body font-medium">claude-3.5-sonnet</span>
+<button class="hover:text-danger"><span class="material-symbols-outlined text-[14px]">close</span></button>
+</div>
+<button class="flex items-center gap-1 border border-dashed border-border-strong px-3 py-1.5 rounded-full text-text-muted hover:bg-surface-container-low transition-colors">
+<span class="material-symbols-outlined text-[14px]">add</span>
+<span class="font-body text-body">添加模型</span>
+</button>
+</div>
+</div>
+<!-- Model Billing Table -->
+<div class="flex flex-col gap-3 md:col-span-2 pt-4">
+<label class="font-section-label text-section-label uppercase text-text-muted">模型计费详情</label>
+<div class="overflow-x-auto border border-border rounded-lg">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low border-b border-border">
+<th class="px-4 py-3 font-section-label text-section-label text-text-muted">别名</th>
+<th class="px-4 py-3 font-section-label text-section-label text-text-muted">PROVIDER</th>
+<th class="px-4 py-3 font-section-label text-section-label text-text-muted">档位</th>
+<th class="px-4 py-3 font-section-label text-section-label text-text-muted">计费方式</th>
+<th class="px-4 py-3 font-section-label text-section-label text-text-muted">输入单价 $/M</th>
+<th class="px-4 py-3 font-section-label text-section-label text-text-muted">输出单价 $/M</th>
+<th class="px-4 py-3 font-section-label text-section-label text-text-muted">缓存读单价 $/M</th>
+<th class="px-4 py-3 font-section-label text-section-label text-text-muted">推荐</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border font-body text-body">
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-4 py-3 font-medium">gpt-4o</td>
+<td class="px-4 py-3 text-text-muted">openai</td>
+<td class="px-4 py-3 text-text-muted">-</td>
+<td class="px-4 py-3">按 token</td>
+<td class="px-4 py-3 font-card-secondary-mono">5.00</td>
+<td class="px-4 py-3 font-card-secondary-mono">15.00</td>
+<td class="px-4 py-3 font-card-secondary-mono">2.50</td>
+<td class="px-4 py-3">
+<button class="text-[#8B8680] border border-[#8B8680] px-2 py-0.5 rounded text-xs hover:bg-[#8B8680] hover:text-white transition-all">推荐</button>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-lowest transition-colors">
+<td class="px-4 py-3 font-medium">claude-3.5-sonnet</td>
+<td class="px-4 py-3 text-text-muted">anthropic</td>
+<td class="px-4 py-3 text-text-muted">-</td>
+<td class="px-4 py-3">按 token</td>
+<td class="px-4 py-3 font-card-secondary-mono">3.00</td>
+<td class="px-4 py-3 font-card-secondary-mono">15.00</td>
+<td class="px-4 py-3 font-card-secondary-mono">0.30</td>
+<td class="px-4 py-3">
+<button class="text-[#8B8680] border border-[#8B8680] px-2 py-0.5 rounded text-xs hover:bg-[#8B8680] hover:text-white transition-all">推荐</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Actions -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-6 pt-4 border-t border-border-strong">
+<div class="flex items-center gap-3">
+<button class="bg-[#8B8680] text-white px-8 py-2.5 rounded font-semibold hover:opacity-90 transition-all active:scale-95 shadow-sm">保存修改</button>
+<button class="px-6 py-2.5 border border-border rounded font-semibold hover:bg-surface-container-low transition-all active:scale-98">取消</button>
+</div>
+<div>
+<button class="px-6 py-2.5 border border-danger text-danger rounded font-semibold hover:bg-danger/5 transition-all active:scale-98 flex items-center gap-2">
+<span class="material-symbols-outlined">delete</span>
+                    删除 Key
+                </button>
+</div>
+</div>
+</main>
+<script>
+        // Micro-interaction for buttons
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                if (this.innerText === '保存修改') {
+                    const originalText = this.innerText;
+                    this.innerText = '正在保存...';
+                    this.classList.add('opacity-80');
+                    setTimeout(() => {
+                        this.innerText = originalText;
+                        this.classList.remove('opacity-80');
+                    }, 1000);
+                }
+            });
+        });
+    </script>
+</body></html>

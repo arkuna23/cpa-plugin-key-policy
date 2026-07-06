@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>选择模型 - CPA Key Manager</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=Courier+Prime&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+            font-size: 20px;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #E3E1DB;
+            border-radius: 10px;
+        }
+        .sticky-header {
+            position: sticky;
+            top: 56px;
+            z-index: 40;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-fixed-dim": "#c8c5c9",
+                        "on-tertiary-container": "#fffbff",
+                        "on-surface": "#1c1b1b",
+                        "on-primary-container": "#fffbff",
+                        "primary-fixed": "#e8e1da",
+                        "surface-dim": "#ddd9d8",
+                        "primary-container": "#78746e",
+                        "on-tertiary-fixed": "#1c1b1e",
+                        "background": "#fdf8f7",
+                        "on-primary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-low": "#f7f3f1",
+                        "on-error-container": "#93000a",
+                        "surface-variant": "#e6e2e0",
+                        "on-background": "#1c1b1b",
+                        "text-primary": "#2D2A26",
+                        "on-tertiary-fixed-variant": "#474649",
+                        "on-primary-fixed": "#1e1b17",
+                        "on-secondary-fixed-variant": "#474743",
+                        "inverse-primary": "#ccc5bf",
+                        "danger": "#C65746",
+                        "secondary": "#5f5f5a",
+                        "border": "#E3E1DB",
+                        "on-secondary-container": "#656560",
+                        "warning": "#E0AA14",
+                        "on-surface-variant": "#4b463f",
+                        "surface-tint": "#625e58",
+                        "on-error": "#ffffff",
+                        "text-muted": "#6D6760",
+                        "tertiary-fixed": "#e5e1e5",
+                        "error": "#ba1a1a",
+                        "primary": "#5f5b56",
+                        "tertiary": "#5d5b5e",
+                        "surface-bright": "#fdf8f7",
+                        "outline": "#7c766e",
+                        "on-primary-fixed-variant": "#4a4641",
+                        "primary-fixed-dim": "#ccc5bf",
+                        "inverse-surface": "#31302f",
+                        "on-tertiary": "#ffffff",
+                        "secondary-fixed": "#e4e2dc",
+                        "on-secondary": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "success": "#10B981",
+                        "tertiary-container": "#767477",
+                        "inverse-on-surface": "#f4f0ee",
+                        "surface-container": "#f1edeb",
+                        "page-bg": "#FAF9F5",
+                        "on-secondary-fixed": "#1b1c18",
+                        "border-strong": "#D5D2CB",
+                        "surface-container-high": "#ebe7e6",
+                        "surface": "#FFFFFF",
+                        "secondary-container": "#e4e2dc",
+                        "outline-variant": "#cdc5bc",
+                        "surface-container-highest": "#e6e2e0",
+                        "secondary-fixed-dim": "#c8c6c1",
+                        "accent": "#8B8680"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "page-padding": "24px",
+                        "gutter": "1rem",
+                        "page-max-width": "1200px",
+                        "grid-gap": "16px",
+                        "card-padding": "16px"
+                    },
+                    "fontFamily": {
+                        "card-secondary-mono": ["Courier Prime"],
+                        "section-label": ["Inter"],
+                        "body": ["Inter"],
+                        "nav-title": ["Inter"],
+                        "nav-subtitle": ["Inter"],
+                        "card-title": ["Inter"]
+                    },
+                    "fontSize": {
+                        "card-secondary-mono": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                        "section-label": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                        "body": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "nav-title": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                        "nav-subtitle": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                        "card-title": ["15px", {"lineHeight": "20px", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-page-bg text-on-surface font-body selection:bg-accent/20">
+<!-- TopNavBar -->
+<header class="bg-surface dark:bg-surface-dim border-b border-border dark:border-outline-variant fixed top-0 w-full z-50">
+<div class="flex justify-between items-center px-page-padding h-14 w-full max-w-page-max-width mx-auto">
+<div class="flex items-center gap-6">
+<div class="flex flex-col">
+<span class="font-nav-title text-nav-title font-bold text-text-primary dark:text-on-surface">CPA Key Manager</span>
+<span class="font-nav-subtitle text-nav-subtitle text-text-muted">api.example.com</span>
+</div>
+<nav class="hidden md:flex gap-4">
+<a class="text-primary dark:text-primary-fixed-dim font-semibold hover:bg-surface-container-low dark:hover:bg-surface-container-highest transition-colors px-3 py-1 rounded" href="#">密钥列表</a>
+</nav>
+</div>
+<div class="flex items-center gap-3">
+<button class="bg-accent text-white px-4 py-1.5 rounded-lg text-body font-semibold hover:opacity-90 transition-all duration-200">新建密钥</button>
+<button class="text-text-muted dark:text-on-surface-variant hover:bg-surface-container-low transition-colors px-3 py-1.5 rounded-lg">退出登录</button>
+</div>
+</div>
+</header>
+<main class="pt-24 pb-32 px-page-padding max-w-page-max-width mx-auto min-h-screen">
+<!-- Header Row -->
+<div class="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+<div class="flex items-center gap-4">
+<button class="flex items-center gap-1 border border-border bg-surface px-3 py-1.5 rounded-lg text-body text-text-primary hover:bg-surface-container-low transition-colors group">
+<span class="material-symbols-outlined group-hover:-translate-x-0.5 transition-transform">arrow_back</span>
+                    返回
+                </button>
+<div>
+<h1 class="text-2xl font-bold text-text-primary">选择模型</h1>
+<p class="text-text-muted font-body mt-1">已选 3 个模型 · 别名将自动等于模型名</p>
+</div>
+</div>
+<div class="hidden md:block">
+<button class="bg-accent text-white px-6 py-2 rounded-lg font-semibold hover:opacity-90 shadow-sm transition-all">完成（已选 3）</button>
+</div>
+</div>
+<!-- Search Bar -->
+<div class="relative mb-6">
+<div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-text-muted">search</span>
+</div>
+<input class="block w-full pl-10 pr-3 py-2.5 bg-surface border border-border rounded-lg text-body focus:ring-2 focus:ring-accent/20 focus:border-accent outline-none transition-all placeholder:text-text-muted/60" placeholder="搜索模型 / provider / 档位" type="text"/>
+</div>
+<!-- Model List Card -->
+<div class="bg-surface border border-border rounded-[10px] overflow-hidden shadow-sm">
+<div class="divide-y divide-border">
+<!-- OpenAI Group -->
+<section class="p-card-padding">
+<div class="flex justify-between items-center mb-4">
+<div class="flex items-center gap-2">
+<span class="font-section-label uppercase text-text-muted tracking-wider">openai</span>
+</div>
+<button class="text-accent text-sm font-semibold hover:underline">全选</button>
+</div>
+<div class="flex flex-wrap gap-2">
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-white font-card-secondary-mono text-card-secondary-mono cursor-pointer transition-all border border-transparent">
+<input checked="" class="hidden" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                            gpt-4o
+                        </label>
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            gpt-4o-mini
+                        </label>
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            gpt-4-turbo
+                        </label>
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            dall-e-3
+                        </label>
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            whisper-1
+                        </label>
+</div>
+</section>
+<!-- Anthropic Group -->
+<section class="p-card-padding bg-surface-container-lowest/50">
+<div class="flex justify-between items-center mb-4">
+<div class="flex items-center gap-2">
+<span class="font-section-label uppercase text-text-muted tracking-wider">anthropic</span>
+</div>
+<button class="text-accent text-sm font-semibold hover:underline">全选</button>
+</div>
+<div class="flex flex-wrap gap-2">
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-white font-card-secondary-mono text-card-secondary-mono cursor-pointer transition-all border border-transparent">
+<input checked="" class="hidden" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                            claude-3.5-sonnet
+                        </label>
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            claude-3-opus
+                        </label>
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            claude-3-haiku
+                        </label>
+</div>
+</section>
+<!-- Codex Team -->
+<section class="p-card-padding">
+<div class="flex justify-between items-center mb-4">
+<div class="flex items-center gap-3">
+<span class="font-section-label uppercase text-text-muted tracking-wider">codex</span>
+<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-accent/10 text-accent uppercase tracking-tighter">team</span>
+</div>
+<button class="text-accent text-sm font-semibold hover:underline">清空</button>
+</div>
+<div class="flex flex-wrap gap-2">
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent text-white font-card-secondary-mono text-card-secondary-mono cursor-pointer transition-all border border-transparent">
+<input checked="" class="hidden" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                            codex-team-1
+                        </label>
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            codex-team-2
+                        </label>
+</div>
+</section>
+<!-- Codex Free -->
+<section class="p-card-padding bg-surface-container-lowest/50">
+<div class="flex justify-between items-center mb-4">
+<div class="flex items-center gap-3">
+<span class="font-section-label uppercase text-text-muted tracking-wider">codex</span>
+<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-secondary/10 text-secondary uppercase tracking-tighter">free</span>
+</div>
+<button class="text-accent text-sm font-semibold hover:underline">全选</button>
+</div>
+<div class="flex flex-wrap gap-2">
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            codex-free-1
+                        </label>
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            codex-free-2
+                        </label>
+</div>
+</section>
+<!-- Google -->
+<section class="p-card-padding">
+<div class="flex justify-between items-center mb-4">
+<div class="flex items-center gap-2">
+<span class="font-section-label uppercase text-text-muted tracking-wider">google</span>
+</div>
+<button class="text-accent text-sm font-semibold hover:underline">全选</button>
+</div>
+<div class="flex flex-wrap gap-2">
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            gemini-pro
+                        </label>
+<label class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-low text-text-muted font-card-secondary-mono text-card-secondary-mono cursor-pointer hover:bg-surface-container-high transition-all border border-transparent">
+<input class="hidden" type="checkbox"/>
+                            gemini-flash
+                        </label>
+</div>
+</section>
+</div>
+</div>
+</main>
+<!-- Sticky Footer -->
+<footer class="fixed bottom-0 left-0 right-0 bg-surface border-t border-border z-40">
+<div class="max-w-page-max-width mx-auto px-page-padding h-16 flex items-center justify-between">
+<div class="text-text-muted font-semibold">
+                已选 3
+            </div>
+<div class="flex gap-3">
+<button class="border border-border text-text-primary px-5 py-2 rounded-lg font-semibold hover:bg-surface-container-low transition-colors">取消</button>
+<button class="bg-accent text-white px-5 py-2 rounded-lg font-semibold hover:opacity-90 shadow-sm transition-all">完成（已选 3）</button>
+</div>
+</div>
+</footer>
+<script>
+        // Micro-interactions for chip toggling
+        document.querySelectorAll('label input[type="checkbox"]').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const parent = this.closest('label');
+                const isChecked = this.checked;
+                
+                if (isChecked) {
+                    parent.classList.remove('bg-surface-container-low', 'text-text-muted');
+                    parent.classList.add('bg-accent', 'text-white');
+                    
+                    // Add checkmark if not already present
+                    if (!parent.querySelector('.material-symbols-outlined')) {
+                        const icon = document.createElement('span');
+                        icon.className = 'material-symbols-outlined text-[16px]';
+                        icon.style.fontVariationSettings = "'FILL' 1";
+                        icon.textContent = 'check_circle';
+                        parent.prepend(icon);
+                    }
+                } else {
+                    parent.classList.add('bg-surface-container-low', 'text-text-muted');
+                    parent.classList.remove('bg-accent', 'text-white');
+                    const icon = parent.querySelector('.material-symbols-outlined');
+                    if (icon) icon.remove();
+                }
+                
+                updateSelectionCount();
+            });
+        });
+
+        function updateSelectionCount() {
+            const count = document.querySelectorAll('label input[type="checkbox"]:checked').length;
+            const countDisplays = document.querySelectorAll('.selection-count-text'); // If we had more, we'd use this
+            
+            // For now updating specific static areas
+            document.querySelector('h1 + p').innerText = `已选 ${count} 个模型 · 别名将自动等于模型名`;
+            document.querySelectorAll('button').forEach(btn => {
+                if (btn.innerText.includes('完成')) {
+                    btn.innerText = `完成（已选 ${count}）`;
+                }
+            });
+            document.querySelector('footer .text-text-muted').innerText = `已选 ${count}`;
+        }
+    </script>
+</body></html>

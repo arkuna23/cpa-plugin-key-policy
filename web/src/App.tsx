@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useNavigate, Link } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate, Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { isAuthed, subscribe, clearSession, getSession, bootstrapFromPanel } from "./store/session";
 import { useT } from "./i18n";
@@ -7,6 +7,7 @@ import KeyList from "./pages/KeyList";
 import KeyNew from "./pages/KeyNew";
 import KeyEdit from "./pages/KeyEdit";
 import KeyUsage from "./pages/KeyUsage";
+import ModelPick from "./pages/ModelPick";
 
 function useAuthTick() {
   const [, setTick] = useState(0);
@@ -14,9 +15,42 @@ function useAuthTick() {
   return isAuthed();
 }
 
+// Desktop top horizontal nav. Mirrors the Stitch "Quiet Paper" design: left =
+// app title + base url, right = nav links + logout. Mobile keeps the legacy
+// .header (hidden on desktop via CSS) and bottom tab bar instead.
+function TopNav() {
+  const t = useT();
+  const nav = useNavigate();
+  const loc = useLocation();
+  const s = getSession();
+  if (!s) return null;
+  // Active state: highlight the nav item matching the current path prefix.
+  const onKeys = loc.pathname === "/keys" || loc.pathname.startsWith("/keys/");
+  const onNew = loc.pathname === "/keys/new" || loc.pathname.startsWith("/keys/new/");
+  return (
+    <div className="topnav">
+      <div className="topnav-inner">
+        <div className="topnav-brand">
+          <span className="tn-title">{t("header.title")}</span>
+          <span className="tn-sub">{s.baseUrl}</span>
+        </div>
+        <div className="topnav-actions">
+          <Link to="/keys" className={"tn-link" + (onKeys && !onNew ? " active" : "")}>{t("header.keyList")}</Link>
+          <Link to="/keys/new" className={"tn-link" + (onNew ? " active" : "")}>{t("header.newKey")}</Link>
+          <button
+            className="btn sm"
+            onClick={() => { clearSession(); nav("/login"); }}
+          >
+            {t("header.logout")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Shell() {
   const authed = useAuthTick();
-  const nav = useNavigate();
   const [bootstrapped, setBootstrapped] = useState(false);
   const t = useT();
 
@@ -46,32 +80,15 @@ function Shell() {
       </Routes>
     );
   }
-  const s = getSession()!;
   return (
     <div className="app">
-      <div className="header">
-        <div>
-          <h1>{t("header.title")}</h1>
-          <div className="sub">{s.baseUrl}</div>
-        </div>
-        <div className="actions">
-          <Link to="/keys"><button className="btn sm">{t("header.keyList")}</button></Link>
-          <Link to="/keys/new"><button className="btn sm primary">{t("header.newKey")}</button></Link>
-          <button
-            className="btn sm"
-            onClick={() => {
-              clearSession();
-              nav("/login");
-            }}
-          >
-            {t("header.logout")}
-          </button>
-        </div>
-      </div>
+      <TopNav />
       <Routes>
         <Route path="/keys" element={<KeyList />} />
         <Route path="/keys/new" element={<KeyNew />} />
+        <Route path="/keys/new/models" element={<ModelPick />} />
         <Route path="/keys/:id/edit" element={<KeyEdit />} />
+        <Route path="/keys/:id/edit/models" element={<ModelPick />} />
         <Route path="/keys/:id/usage" element={<KeyUsage />} />
         <Route path="*" element={<Navigate to="/keys" replace />} />
       </Routes>

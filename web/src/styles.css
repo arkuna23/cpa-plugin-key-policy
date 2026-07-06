@@ -134,8 +134,37 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-2); text-decoration: underline; }
 
-.app { max-width: 1140px; margin: 0 auto; padding: 24px 20px 80px; }
+/* Desktop shell: top horizontal nav + centered 1200px content.
+ * Mobile keeps the old .header (stacked) via the max-width block. */
+.app { max-width: 1200px; margin: 0 auto; padding: 24px 24px 80px; }
 
+/* Top horizontal nav (desktop). Mirrors the Stitch 'Quiet Paper' design:
+ * paper bg, bottom border, left = title + base url, right = nav + actions. */
+.topnav {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  margin: 0 -24px 24px;
+  padding: 0 24px;
+}
+.topnav-inner {
+  max-width: 1200px; margin: 0 auto;
+  height: 56px; display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+}
+.topnav-brand { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.topnav-brand .tn-title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.topnav-brand .tn-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topnav-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.topnav-actions .tn-link {
+  font-size: 14px; font-weight: 600; color: var(--muted); text-decoration: none; padding: 6px 4px;
+  border-bottom: 2px solid transparent; transition: color var(--t-fast), border-color var(--t-fast);
+}
+.topnav-actions .tn-link:hover { color: var(--accent-2); text-decoration: none; }
+.topnav-actions .tn-link.active { color: var(--accent); border-bottom-color: var(--accent); }
+.topnav-actions .tn-link.danger:hover { color: var(--danger); }
+
+/* Legacy .header kept for mobile (max-width:640px) stacked layout. */
 .header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 0; margin-bottom: 24px; border-bottom: 1px solid var(--border);
@@ -162,6 +191,14 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 .btn.danger { background-color: var(--danger); color: var(--on-accent); border-color: var(--danger); }
 .btn.danger:hover { background-color: var(--accent-3); filter: brightness(0.95); }
 .btn.sm { padding: 8px 10px; font-size: 13px; }
+/* danger-outline: transparent bg, red text + border (for destructive actions
+ * that shouldn't compete with the primary save button, e.g. 删除 Key). */
+.btn.danger-outline {
+  background: transparent; color: var(--danger); border-color: var(--danger-border);
+}
+.btn.danger-outline:hover {
+  background: var(--danger-soft); border-color: var(--danger); color: var(--danger);
+}
 
 /* Card — panel .card (radius-lg, panel bg, hairline border, shadow-sm) */
 .card {
@@ -438,9 +475,16 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 
 /* --- Mobile-only component classes (hidden on desktop, shown on mobile) --- */
-/* .card-stack: the mobile key list container. Hidden on desktop by the
-   @media (min-width:641px) block at the end of this file. */
-.card-stack { }
+/* .card-stack: key list container. On mobile it's a vertical stack;
+ * on desktop it becomes a responsive card grid (min-width:641px block). */
+.card-stack { display: flex; flex-direction: column; gap: 10px; }
+@media (min-width: 641px) {
+  .card-stack {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+}
 
 /* .tabbar: bottom sticky navigation. Hidden on desktop by the min-width
    block; shown on mobile by the max-width block below. */
@@ -550,6 +594,33 @@ td.strong { font-weight: 600; color: var(--text); }
   border-radius: 0 var(--r-md) var(--r-md) 0;
 }
 .keycard .kc-revoke .revoke-icon { font-size: 18px; }
+
+/* Desktop hover action row (>= 641px). Not an overlay — it sits at the
+ * card footer and expands on hover/focus-within, so card info stays visible
+ * and the 5 buttons never get clipped (Stitch's inset-0 overlay clipped them
+ * on short cards). */
+.keycard .kc-actions {
+  display: none; /* hidden on mobile; grid shown on desktop */
+}
+@media (min-width: 641px) {
+  .keycard { cursor: default; margin-bottom: 0; }
+  .keycard:hover { border-color: var(--border-hover); box-shadow: 0 0 0 3px var(--accent-ring); }
+  .keycard .kc-actions {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid var(--border);
+    max-height: 0; overflow: hidden; opacity: 0;
+    margin-top: 0; padding-top: 0; border-top-width: 0;
+    transition: max-height var(--t-fast), opacity var(--t-fast), margin-top var(--t-fast), padding-top var(--t-fast), border-top-width var(--t-fast);
+  }
+  .keycard:hover .kc-actions,
+  .keycard:focus-within .kc-actions {
+    max-height: 80px; opacity: 1;
+    margin-top: 12px; padding-top: 12px; border-top-width: 1px;
+  }
+  .keycard.disabled .kc-actions { max-height: 0 !important; opacity: 0 !important; overflow: hidden; }
+  .keycard .kc-actions .btn { flex: 0 0 auto; }
+}
 
 /* .usage-hero: the big-number card at the top of the mobile usage page. */
 .usage-hero {
@@ -692,7 +763,94 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .mmodels .mm-price.per_call { color: var(--accent); }
 
-/* .section-label: uppercase tracked section headers. */
+/* .usage-hero-d: desktop summary hero on the KeyUsage page (3 stat tiles
+ * + a usage progress bar). Mobile uses .usage-hero (ring chart) instead. */
+.usage-hero-d {
+  display: none;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 20px; margin-bottom: 16px;
+}
+.usage-hero-d .uhd-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+.usage-hero-d .uhd-tile { display: flex; flex-direction: column; gap: 4px; }
+.usage-hero-d .uhd-tk { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.usage-hero-d .uhd-tv { font-size: 26px; font-weight: 700; line-height: 1.1; font-family: "Courier Prime", ui-monospace, Consolas, monospace; }
+.usage-hero-d .uhd-tv.accent { color: var(--accent); }
+.usage-hero-d .uhd-bar { height: 6px; border-radius: var(--r-full); background: var(--muted-bg); overflow: hidden; margin-bottom: 6px; }
+.usage-hero-d .uhd-bar > span { display: block; height: 100%; border-radius: var(--r-full); background: var(--accent); }
+.usage-hero-d .uhd-bar.over > span { background: var(--danger); }
+.usage-hero-d .uhd-barcap { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.usage-hero-d .uhd-barcap .over { color: var(--danger); font-weight: 600; }
+@media (min-width: 641px) {
+  .usage-hero-d { display: block; }
+}
+
+/* Login centered card (desktop). Mobile keeps the old .app + .header. */
+.login-page {
+  min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px;
+  padding: 40px 20px; box-sizing: border-box;
+}
+.login-page .lp-brand { text-align: center; }
+.login-page .lp-brand .lp-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.login-page .lp-brand .lp-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.login-page .lp-card { max-width: 460px; width: 100%; padding: 32px; }
+.login-page .lp-card .btn.primary { width: 100%; padding: 12px; margin-top: 4px; }
+.login-page .lp-note { font-size: 12px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+@media (max-width: 640px) {
+  /* On mobile, fall back to the standard .app shell layout for login. */
+  .login-page { min-height: auto; justify-content: flex-start; padding: 0; }
+}
+
+/* Model picker standalone page (desktop + mobile). */
+.model-pick-page { display: flex; flex-direction: column; gap: 16px; }
+.model-pick-page .mp-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.model-pick-page .mp-head h1 { margin: 0; font-size: 20px; font-weight: 700; flex: 1; min-width: 0; }
+.model-pick-page .mp-sub { font-size: 12px; color: var(--muted); margin-top: -8px; }
+.model-pick-page .mp-search { position: relative; }
+.model-pick-page .mp-search .input { padding-left: 34px; }
+.model-pick-page .mp-search .mp-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 16px; pointer-events: none; }
+.model-pick-page .mp-list { max-height: 60vh; overflow-y: auto; }
+.model-pick-page .mp-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; border-top: 1px solid var(--border);
+}
+.model-pick-page .mp-footer .mp-count { font-size: 13px; color: var(--muted); }
+.model-pick-page .mp-footer .mp-btns { display: flex; gap: 8px; }
+
+/* Desktop form page: keep 2-col grids, card surface, h1 + actions row. */
+.form-page .fp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.form-page .fp-head h1 { margin: 0; font-size: 20px; font-weight: 700; }
+.form-page .fp-head .fp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.form-page .fp-idline { font-size: 12px; color: var(--muted); margin-bottom: 12px; font-family: "Courier Prime", ui-monospace, Consolas, monospace; }
+.form-page .fp-idline .fp-name { color: var(--text); margin-left: 8px; }
+.form-page .fp-foot { display: flex; align-items: center; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.form-page .fp-foot .fp-foot-right { margin-left: auto; display: flex; gap: 8px; }
+.form-page .fp-note { font-size: 12px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+/* Selected-model chips box on the form (replaces inline picker on desktop). */
+.model-chips-box {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 12px; background: var(--bg); min-height: 48px;
+}
+.model-chips-box .mc-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; padding: 4px 10px; border-radius: var(--r-full);
+  background: var(--accent-soft); color: var(--accent-3); border: 1px solid var(--accent-ring);
+}
+.model-chips-box .mc-chip .mc-x {
+  cursor: pointer; color: var(--muted); font-weight: 700; border: none; background: none; padding: 0; line-height: 1;
+}
+.model-chips-box .mc-chip .mc-x:hover { color: var(--danger); }
+.model-chips-box .mc-add {
+  font-size: 13px; padding: 6px 12px; border-radius: var(--r-md);
+  background: var(--muted-bg); color: var(--muted); border: 1px dashed var(--border-strong); cursor: pointer; font-family: inherit;
+}
+.model-chips-box .mc-add:hover { border-color: var(--accent); color: var(--accent); }
+.model-chips-box .mc-empty { font-size: 13px; color: var(--muted); }
+@media (max-width: 640px) {
+  .form-page .fp-head h1 { display: none; }
+}
+
 .section-label {
   font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
   color: var(--muted); text-transform: uppercase;
@@ -703,9 +861,20 @@ td.strong { font-weight: 600; color: var(--text); }
 .sechead { display: flex; justify-content: space-between; align-items: center; margin: 16px 0 10px; }
 .sechead .sh-chevron { color: var(--muted); cursor: pointer; }
 
-/* Hide mobile-only blocks on desktop. */
+/* Hide mobile-only blocks on desktop. .card-stack is NOT hidden — it
+ * becomes the desktop card grid (see above). .usage-hero stays hidden on
+ * desktop because the desktop usage page uses .usage-hero-d instead.
+ * .seg is hidden on desktop globally, but the KeyUsage header's toggle is
+ * un-hidden below so daily/weekly still works on desktop. */
 @media (min-width: 641px) {
-  .card-stack, .tabbar, .fab, .usage-hero, .bar-rank,
+  .tabbar, .fab, .bar-rank,
   .detail-card, .mmodels, .section-label, .sechead, .seg,
   .mobile-only, .mobile-form-header { display: none !important; }
+  /* Desktop shows the top nav; mobile keeps the legacy .header. */
+  .topnav { display: block; }
+  /* KeyUsage header keeps its daily/weekly toggle on desktop. */
+  .keyusage-header .seg { display: inline-flex !important; }
+}
+@media (max-width: 640px) {
+  .topnav { display: none; }
 }

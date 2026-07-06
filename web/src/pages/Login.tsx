@@ -39,14 +39,12 @@ export default function Login() {
   };
 
   return (
-    <div className="app">
-      <div className="header">
-        <div>
-          <h1>{t("header.title")}</h1>
-          <div className="sub">{t("login.subTitle")}</div>
-        </div>
+    <div className="login-page">
+      <div className="lp-brand">
+        <div className="lp-title">{t("header.title")}</div>
+        <div className="lp-sub">{t("login.subTitle")}</div>
       </div>
-      <form className="card" onSubmit={submit} style={{ maxWidth: 460 }}>
+      <form className="card lp-card" onSubmit={submit}>
         <div className="form-row">
           <label>{t("login.baseUrl")}</label>
           <input
@@ -71,13 +69,9 @@ export default function Login() {
         <button className="btn primary" type="submit" disabled={busy}>
           {busy ? t("login.verifying") : t("login.submit")}
         </button>
-        <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>
-          {t("login.memoryNote")}
-        </div>
+        <div className="lp-note">{t("login.memoryNote")}</div>
         {isEmbedded() && (
-          <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-            {t("login.embeddedFallback")}
-          </div>
+          <div className="lp-note">{t("login.embeddedFallback")}</div>
         )}
       </form>
     </div>

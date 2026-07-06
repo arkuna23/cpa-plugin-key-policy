@@ -61,6 +61,7 @@
     }
   },
   "edit": {
+    "hTitle": "编辑 Key",
     "title": "编辑 Key · {{id}}",
     "notFound": "未找到",
     "save": "保存修改"
@@ -70,6 +71,9 @@
     "create": "创建 Key"
   },
   "keyForm": {
+    "modelsEmpty": "未选择模型",
+    "addModel": "添加模型",
+    "removeModel": "移除模型",
     "idLabel": "Key ID *",
     "idPlaceholder": "例如 team-a",
     "nameLabel": "名称（可选）",
@@ -116,6 +120,9 @@
     }
   },
   "picker": {
+    "title": "选择模型",
+    "done": "完成（已选 {{count}}）",
+    "noMatch": "没有匹配的模型。",
     "loading": "加载可用模型…",
     "loadFailed": "加载模型列表失败",
     "empty": "未从 CPA 取到任何模型。请确认 CPA 已配置上游 provider。",

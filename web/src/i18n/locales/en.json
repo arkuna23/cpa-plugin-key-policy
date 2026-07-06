@@ -61,6 +61,7 @@
     }
   },
   "edit": {
+    "hTitle": "Edit Key",
     "title": "Edit Key · {{id}}",
     "notFound": "Not found",
     "save": "Save changes"
@@ -70,6 +71,9 @@
     "create": "Create key"
   },
   "keyForm": {
+    "modelsEmpty": "No models selected",
+    "addModel": "Add models",
+    "removeModel": "Remove model",
     "idLabel": "Key ID *",
     "idPlaceholder": "e.g. team-a",
     "nameLabel": "Name (optional)",
@@ -116,6 +120,9 @@
     }
   },
   "picker": {
+    "title": "Select models",
+    "done": "Done ({{count}})",
+    "noMatch": "No models match your search.",
     "loading": "Loading available models…",
     "loadFailed": "Failed to load model list",
     "empty": "No models returned from CPA. Make sure CPA has upstream providers configured.",
