@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Key 用量详情 - CPA 密钥管理</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=Courier+Prime&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed": "#e4e2dc",
+                        "secondary-container": "#e4e2dc",
+                        "surface-dim": "#ddd9d8",
+                        "surface": "#FFFFFF",
+                        "on-primary": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "surface-container-high": "#ebe7e6",
+                        "tertiary-container": "#767477",
+                        "on-primary-container": "#fffbff",
+                        "border-strong": "#D5D2CB",
+                        "tertiary-fixed-dim": "#c8c5c9",
+                        "on-surface": "#1c1b1b",
+                        "on-secondary-container": "#656560",
+                        "danger": "#C65746",
+                        "secondary-fixed-dim": "#c8c6c1",
+                        "warning": "#E0AA14",
+                        "success": "#10B981",
+                        "page-bg": "#FAF9F5",
+                        "surface-container-highest": "#e6e2e0",
+                        "background": "#fdf8f7",
+                        "tertiary": "#5d5b5e",
+                        "surface-tint": "#625e58",
+                        "outline": "#7c766e",
+                        "on-surface-variant": "#4b463f",
+                        "on-error": "#ffffff",
+                        "primary-fixed-dim": "#ccc5bf",
+                        "inverse-primary": "#ccc5bf",
+                        "border": "#E3E1DB",
+                        "primary-fixed": "#e8e1da",
+                        "inverse-surface": "#31302f",
+                        "inverse-on-surface": "#f4f0ee",
+                        "on-tertiary-container": "#fffbff",
+                        "on-error-container": "#93000a",
+                        "on-tertiary-fixed": "#1c1b1e",
+                        "on-secondary": "#ffffff",
+                        "secondary": "#5f5f5a",
+                        "text-muted": "#6D6760",
+                        "primary-container": "#78746e",
+                        "on-secondary-fixed": "#1b1c18",
+                        "surface-variant": "#e6e2e0",
+                        "on-primary-fixed": "#1e1b17",
+                        "tertiary-fixed": "#e5e1e5",
+                        "outline-variant": "#cdc5bc",
+                        "error": "#ba1a1a",
+                        "on-background": "#1c1b1b",
+                        "primary": "#5f5b56",
+                        "on-secondary-fixed-variant": "#474743",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-fixed-variant": "#474649",
+                        "surface-container-low": "#f7f3f1",
+                        "surface-bright": "#fdf8f7",
+                        "text-primary": "#2D2A26",
+                        "surface-container": "#f1edeb",
+                        "on-primary-fixed-variant": "#4a4641",
+                        "on-tertiary": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "grid-gap": "16px",
+                        "gutter": "1rem",
+                        "page-padding": "24px",
+                        "card-padding": "16px",
+                        "page-max-width": "1200px"
+                    },
+                    "fontFamily": {
+                        "nav-title": ["Inter"],
+                        "nav-subtitle": ["Inter"],
+                        "card-title": ["Inter"],
+                        "section-label": ["Inter"],
+                        "body": ["Inter"],
+                        "card-secondary-mono": ["Courier Prime"]
+                    },
+                    "fontSize": {
+                        "nav-title": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                        "nav-subtitle": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                        "card-title": ["15px", {"lineHeight": "20px", "fontWeight": "600"}],
+                        "section-label": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                        "body": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "card-secondary-mono": ["12px", {"lineHeight": "16px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-color: #FAF9F5;
+            font-family: 'Inter', sans-serif;
+            color: #2D2A26;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .paper-card {
+            background: #FFFFFF;
+            border: 1px solid #E3E1DB;
+            border-radius: 10px;
+            transition: border-color 0.2s ease;
+        }
+        .paper-card:hover {
+            border-color: #D5D2CB;
+        }
+        .btn-secondary {
+            border: 1px solid #E3E1DB;
+            background: transparent;
+            height: 36px;
+            padding: 0 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .btn-secondary:hover {
+            border-color: #8B8680;
+            background-color: #F7F3F1;
+        }
+        .btn-primary {
+            background-color: #8B8680;
+            color: #FFFFFF;
+            height: 36px;
+            padding: 0 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.2s;
+            cursor: pointer;
+        }
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+        .tag-green {
+            background-color: rgba(16, 185, 129, 0.1);
+            color: #10B981;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .tag-greige {
+            background-color: #E4E2DC;
+            color: #5F5F5A;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .tag-muted {
+            background-color: #F1EDEB;
+            color: #6D6760;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 500;
+        }
+        .mono {
+            font-family: 'Courier Prime', monospace;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+<!-- Top Navigation Bar -->
+<header class="w-full border-b border-border bg-page-bg">
+<div class="flex justify-between items-center h-14 px-page-padding max-w-page-max-width mx-auto">
+<div class="flex items-center gap-4">
+<span class="text-nav-title font-nav-title font-bold text-text-primary">CPA 密钥管理</span>
+<nav class="hidden md:flex gap-6">
+<a class="text-primary font-semibold font-nav-title text-nav-title" href="#">密钥列表</a>
+<a class="text-secondary hover:bg-surface-container-low transition-colors px-2 py-1 rounded font-nav-title text-nav-title" href="#">新建密钥</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="text-secondary text-nav-title font-nav-title hover:bg-surface-container-low transition-colors px-3 py-1 rounded cursor-pointer">退出登录</button>
+</div>
+</div>
+</header>
+<main class="max-w-page-max-width mx-auto px-page-padding py-8 space-y-6">
+<!-- Header Area -->
+<section class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div class="flex items-center gap-4">
+<button class="btn-secondary">
+<span class="material-symbols-outlined mr-1 text-base">arrow_back</span>
+                    返回
+                </button>
+<div class="flex flex-col">
+<div class="flex items-center gap-2">
+<span class="mono text-lg font-bold text-text-primary">team-a</span>
+<span class="text-muted text-body font-body">团队A主密钥</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<!-- Segmented Control -->
+<div class="inline-flex bg-surface-container-low p-1 rounded-lg border border-border">
+<button class="px-4 py-1.5 text-sm font-semibold bg-white shadow-sm rounded-md text-text-primary">今日</button>
+<button class="px-4 py-1.5 text-sm font-medium text-secondary hover:text-text-primary transition-colors">本周</button>
+</div>
+<button class="btn-secondary">
+<span class="material-symbols-outlined mr-1 text-base">edit</span>
+                    编辑
+                </button>
+</div>
+</section>
+<!-- Summary Hero Card -->
+<div class="paper-card p-6">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-12 mb-8">
+<!-- Stat 1 -->
+<div class="space-y-1">
+<p class="text-section-label font-section-label text-text-muted uppercase">今日花费</p>
+<div class="flex items-baseline gap-1">
+<span class="mono text-2xl font-bold text-[#8B8680]">$8.45</span>
+</div>
+</div>
+<!-- Stat 2 -->
+<div class="space-y-1">
+<p class="text-section-label font-section-label text-text-muted uppercase">调用次数</p>
+<p class="mono text-2xl font-bold text-text-primary">1,204</p>
+</div>
+<!-- Stat 3 -->
+<div class="space-y-1">
+<p class="text-section-label font-section-label text-text-muted uppercase">平均 RPM</p>
+<p class="mono text-2xl font-bold text-text-primary">12</p>
+</div>
+</div>
+<!-- Usage Progress Bar -->
+<div class="space-y-3">
+<div class="flex justify-between items-end">
+<div class="flex flex-col">
+<span class="text-section-label font-section-label text-text-muted">预算消耗状况</span>
+<span class="text-body font-semibold text-text-primary">$8.45 / $10.00</span>
+</div>
+<span class="text-body font-bold text-text-primary">85%</span>
+</div>
+<div class="w-full h-2 bg-[#E9E6DF] rounded-full overflow-hidden">
+<div class="h-full bg-[#8B8680] rounded-full transition-all duration-500 ease-out" style="width: 85%;"></div>
+</div>
+</div>
+</div>
+<!-- Usage Table Card -->
+<div class="paper-card overflow-hidden">
+<div class="p-4 border-b border-border bg-surface-container-low">
+<h2 class="font-card-title text-card-title text-text-primary">各模型详细统计</h2>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low/50">
+<th class="px-4 py-3 text-section-label font-section-label text-text-muted border-b border-border">别名</th>
+<th class="px-4 py-3 text-section-label font-section-label text-text-muted border-b border-border">计费方式</th>
+<th class="px-4 py-3 text-section-label font-section-label text-text-muted border-b border-border">PROVIDER</th>
+<th class="px-4 py-3 text-section-label font-section-label text-text-muted border-b border-border">USD</th>
+<th class="px-4 py-3 text-section-label font-section-label text-text-muted border-b border-border">调用次数</th>
+<th class="px-4 py-3 text-section-label font-section-label text-text-muted border-b border-border">INPUT TOKENS</th>
+<th class="px-4 py-3 text-section-label font-section-label text-text-muted border-b border-border">OUTPUT TOKENS</th>
+<th class="px-4 py-3 text-section-label font-section-label text-text-muted border-b border-border">CACHE TOKENS</th>
+<th class="px-4 py-3 text-section-label font-section-label text-text-muted border-b border-border">命中率</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border">
+<!-- Row 1 -->
+<tr class="hover:bg-surface-container-low/30 transition-colors">
+<td class="px-4 py-4 text-body font-semibold">gpt-4o</td>
+<td class="px-4 py-4"><span class="tag-green">按 token</span></td>
+<td class="px-4 py-4 text-body text-secondary">openai</td>
+<td class="px-4 py-4 mono font-bold text-text-primary">$5.20</td>
+<td class="px-4 py-4 mono text-body">680</td>
+<td class="px-4 py-4 mono text-body text-text-muted">1.2M</td>
+<td class="px-4 py-4 mono text-body text-text-muted">340K</td>
+<td class="px-4 py-4 mono text-body text-text-muted">210K</td>
+<td class="px-4 py-4 mono text-body text-text-primary">63%</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-container-low/30 transition-colors">
+<td class="px-4 py-4 text-body font-semibold">claude-3.5-sonnet</td>
+<td class="px-4 py-4"><span class="tag-green">按 token</span></td>
+<td class="px-4 py-4 text-body text-secondary">anthropic</td>
+<td class="px-4 py-4 mono font-bold text-text-primary">$2.15</td>
+<td class="px-4 py-4 mono text-body">320</td>
+<td class="px-4 py-4 mono text-body text-text-muted">480K</td>
+<td class="px-4 py-4 mono text-body text-text-muted">95K</td>
+<td class="px-4 py-4 mono text-body text-text-muted">410K</td>
+<td class="px-4 py-4 mono text-body text-text-primary">46%</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface-container-low/30 transition-colors">
+<td class="px-4 py-4 text-body font-semibold">gemini-pro</td>
+<td class="px-4 py-4"><span class="tag-greige">按次</span></td>
+<td class="px-4 py-4 text-body text-secondary">google</td>
+<td class="px-4 py-4 mono font-bold text-text-primary">$1.10</td>
+<td class="px-4 py-4 mono text-body">204</td>
+<td class="px-4 py-4 mono text-body text-text-muted">—</td>
+<td class="px-4 py-4 mono text-body text-text-muted">—</td>
+<td class="px-4 py-4 mono text-body text-text-muted">—</td>
+<td class="px-4 py-4 mono text-body text-text-primary">—</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-surface-container-low/30 transition-colors opacity-60">
+<td class="px-4 py-4">
+<div class="flex flex-col gap-1">
+<span class="text-body font-semibold text-text-muted">dall-e-3</span>
+<div><span class="tag-muted">已不在配置中</span></div>
+</div>
+</td>
+<td class="px-4 py-4"><span class="tag-greige">按次</span></td>
+<td class="px-4 py-4 text-body text-secondary">openai</td>
+<td class="px-4 py-4 mono font-bold text-text-muted">$0.00</td>
+<td class="px-4 py-4 mono text-body text-text-muted">0</td>
+<td class="px-4 py-4 mono text-body text-text-muted">—</td>
+<td class="px-4 py-4 mono text-body text-text-muted">—</td>
+<td class="px-4 py-4 mono text-body text-text-muted">—</td>
+<td class="px-4 py-4 mono text-body text-text-muted">—</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="p-4 bg-surface-container-low/20 border-t border-border">
+<p class="text-nav-subtitle text-text-muted">数据更新于: 2023-11-20 14:30:05 (UTC+8)</p>
+</div>
+</div>
+</main>
+<script>
+        // Light interactive elements
+        document.querySelectorAll('.btn-secondary, .btn-primary').forEach(button => {
+            button.addEventListener('mousedown', () => {
+                button.style.opacity = '0.7';
+            });
+            button.addEventListener('mouseup', () => {
+                button.style.opacity = '1';
+            });
+            button.addEventListener('mouseleave', () => {
+                button.style.opacity = '1';
+            });
+        });
+    </script>
+</body></html>

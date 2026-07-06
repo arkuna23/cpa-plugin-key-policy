@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import type { KeyPublic, ModelRule } from "../types";
 import ModelPicker from "./ModelPicker";
 import { getPriceTable, lookupPrice, type PriceTable } from "../store/modelPrices";
@@ -26,7 +27,16 @@ interface Props {
   onCancel: () => void;
   // top-level error to render
   error?: string;
-  // when set, show a one-time plain key modal
+  // route path for the standalone model-picker page (e.g. "/keys/new/models").
+  // When set, the desktop form renders a chip box + "add model" button that
+  // navigates here with the current models as router state. The picker page
+  // navigates back with state.pickedModels, which the parent merges into
+  // `initial` before re-rendering this form.
+  pickPath?: string;
+  // extra-danger button config for the footer (edit mode). When provided,
+  // renders a danger-outline button on the far right of the footer.
+  dangerLabel?: string;
+  onDanger?: () => void;
 }
 
 // Pricing for a single alias, kept in form state alongside the model selection.
@@ -63,8 +73,11 @@ export default function KeyForm({
   onSubmit,
   onCancel,
   error,
+  pickPath,
+  dangerLabel,
+  onDanger,
 }: Props) {
-  const [id, setId] = useState(initial?.id ?? "");
+  const nav = useNavigate();  const [id, setId] = useState(initial?.id ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [rpm, setRpm] = useState(initial?.rpm ?? 0);
@@ -618,7 +631,24 @@ export default function KeyForm({
 
       <div className="form-row">
         <label>{t("keyForm.modelsLabel")}</label>
-        <ModelPicker initial={initial?.models} onChange={handleModelsChange} />
+        {pickPath ? (
+          <div className="model-chips-box">
+            {models.length === 0 && <span className="mc-empty">{t("keyForm.modelsEmpty")}</span>}
+            {models.map((m) => (
+              <span key={priceKey(m)} className="mc-chip">
+                {m.alias}{m.group ? " · " + m.group : ""}
+                <button type="button" className="mc-x" onClick={() => {
+                  setModels((prev) => prev.filter((x) => priceKey(x) !== priceKey(m)));
+                }} aria-label={t("keyForm.removeModel")}>×</button>
+              </span>
+            ))}
+            <button type="button" className="mc-add" onClick={() => nav(pickPath, { state: { models } })}>
+              + {t("keyForm.addModel")}
+            </button>
+          </div>
+        ) : (
+          <ModelPicker initial={initial?.models} onChange={handleModelsChange} />
+        )}
       </div>
 
       {/* Per-alias pricing table. Stamped onto each ModelRule at submit.
@@ -653,11 +683,16 @@ export default function KeyForm({
 
       {(localErr || error) && <div className="error">{localErr || error}</div>}
 
-      <div className="actions">
+      <div className="actions fp-foot">
         <button className="btn primary" type="submit" disabled={busy}>
           {busy ? t("keyForm.submitting") : submitLabel}
         </button>
         <button className="btn" type="button" onClick={onCancel}>{t("keyForm.cancel")}</button>
+        {dangerLabel && onDanger && (
+          <span className="fp-foot-right">
+            <button type="button" className="btn danger-outline" onClick={onDanger}>{dangerLabel}</button>
+          </span>
+        )}
       </div>
     </form>
   );

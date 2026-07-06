@@ -129,7 +129,35 @@ export default function KeyUsage() {
         </div>
       </div>
 
-      {/* Desktop: card with the per-alias table (unchanged) */}
+      {/* Desktop: hero summary + per-alias table (unchanged) */}
+      <div className="usage-hero-d">
+        <div className="uhd-tiles">
+          <div className="uhd-tile">
+            <span className="uhd-tk">{win === "daily" ? t("keyUsage.mobile.todaySpend") : t("keyUsage.mobile.weekSpend")}</span>
+            <span className={"uhd-tv" + (heroLimit > 0 && heroUsd >= heroLimit ? " accent" : "")}>{fmtUsd(heroUsd)}</span>
+          </div>
+          <div className="uhd-tile">
+            <span className="uhd-tk">{t("keyUsage.colCalls")}</span>
+            <span className="uhd-tv">{fmtInt(heroCalls)}</span>
+          </div>
+          <div className="uhd-tile">
+            <span className="uhd-tk">{t("keyUsage.mobile.limit")}</span>
+            <span className="uhd-tv">{heroLimit > 0 ? fmtUsd(heroLimit) : t("keyUsage.mobile.noLimit")}</span>
+          </div>
+        </div>
+        {heroLimit > 0 && (
+          <>
+            <div className={"uhd-bar" + (heroUsd >= heroLimit ? " over" : "")}>
+              <span style={{ width: Math.min(100, heroPct) + "%" }} />
+            </div>
+            <div className="uhd-barcap">
+              <span>{fmtUsd(heroUsd)} / {fmtUsd(heroLimit)}</span>
+              <span className={heroUsd >= heroLimit ? "over" : ""}>{Math.round(heroPct)}%</span>
+            </div>
+          </>
+        )}
+      </div>
+
       <div className="card table-wrap">
         {!hasUsage && <div className="muted keyusage-empty">{t("keyUsage.empty")}</div>}
         <table>
