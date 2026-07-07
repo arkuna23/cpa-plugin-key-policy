@@ -118,7 +118,8 @@
       "sectionLimits": "Limits",
       "sectionAccess": "Access",
       "sectionModels": "Models & pricing"
-    }
+    },
+    "existingAliases": "Existing Aliases (quick reference)"
   },
   "picker": {
     "title": "Select models",

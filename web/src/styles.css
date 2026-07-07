@@ -1017,3 +1017,17 @@ td.strong { font-weight: 600; color: var(--text); }
   .rule-list { max-width: 100%; }
   .map-form-page { padding: 16px; }
 }
+
+/* KeyForm existing-aliases quick-pick section */
+.kf-alias-pick { margin-bottom: 12px; }
+.kf-alias-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kf-alias-chip {
+  font-family: var(--mono); font-size: 12px; padding: 4px 12px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--card);
+  color: var(--muted); cursor: pointer; transition: all .15s;
+}
+.kf-alias-chip:hover { border-color: var(--border-hover); color: var(--text); }
+.kf-alias-chip.selected {
+  background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+  font-weight: 600;
+}

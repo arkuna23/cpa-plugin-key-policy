@@ -118,7 +118,8 @@
       "sectionLimits": "Лимиты",
       "sectionAccess": "Доступ",
       "sectionModels": "Модели и цены"
-    }
+    },
+    "existingAliases": "Существующие псевдонимы"
   },
   "picker": {
     "title": "Выбор моделей",

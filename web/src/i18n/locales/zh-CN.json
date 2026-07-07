@@ -118,7 +118,8 @@
       "sectionLimits": "用量上限",
       "sectionAccess": "访问",
       "sectionModels": "模型与计价"
-    }
+    },
+    "existingAliases": "已有别名（快捷引用全局别名）"
   },
   "picker": {
     "title": "选择模型",

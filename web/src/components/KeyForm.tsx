@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { getPluginStatus } from "../store/pluginStatus";
-import type { KeyPublic, ModelRule } from "../types";
+import type { KeyPublic, ModelRule, AliasMapping } from "../types";
 import ModelPicker from "./ModelPicker";
 import { getPriceTable, lookupPrice, type PriceTable } from "../store/modelPrices";
+import { fetchAliases } from "../api/mappings";
 import { useT } from "../i18n";
 
 export interface KeyFormValues {
@@ -121,6 +122,82 @@ export default function KeyForm({
   const [busy, setBusy] = useState(false);
   const [localErr, setLocalErr] = useState("");
   const [expandedPrice, setExpandedPrice] = useState<Record<string, boolean>>({});
+
+  // Global alias table (fetched once on mount). Used by the "已有别名" section
+  // so the user can quickly include an alias's targets instead of picking
+  // each provider+model+group individually from the catalog. Clicking a
+  // global alias adds ALL its targets as ModelRules (so round-robin can rotate
+  // across them); the backend ups-server dedups by alias+provider+target_model
+  // so it reuses the existing global alias instead of creating a duplicate.
+  const [globalAliases, setGlobalAliases] = useState<AliasMapping[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void fetchAliases().then((list) => { if (alive) setGlobalAliases(list); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // aliasSelected reports whether every target of `a` is already in `models`
+  // (i.e. the alias is fully included).
+  const aliasSelected = useCallback((a: AliasMapping) => {
+    return a.targets.every((tgt) =>
+      models.some((m) =>
+        m.alias.toLowerCase() === a.alias.toLowerCase() &&
+        m.provider.toLowerCase() === tgt.provider.toLowerCase() &&
+        m.target_model.toLowerCase() === tgt.target_model.toLowerCase() &&
+        (m.group ?? "").toLowerCase() === (tgt.group ?? "").toLowerCase(),
+      ),
+    );
+  }, [models]);
+
+  // toggleAlias either adds all of an alias's targets (as ModelRules, with the
+  // alias's pricing stamped in) or removes all of them.
+  const toggleAlias = useCallback((a: AliasMapping) => {
+    if (aliasSelected(a)) {
+      // Remove all targets of this alias.
+      setModels((prev) => prev.filter((m) =>
+        !(m.alias.toLowerCase() === a.alias.toLowerCase()),
+      ));
+      setPrices((prev) => {
+        const next = { ...prev };
+        for (const tgt of a.targets) {
+          const k = priceKey({ alias: a.alias, group: tgt.group });
+          delete next[k];
+        }
+        return next;
+      });
+    } else {
+      // Add all targets.
+      const newRules: ModelRule[] = a.targets.map((tgt) => ({
+        alias: a.alias,
+        provider: tgt.provider,
+        target_model: tgt.target_model,
+        group: tgt.group ?? "",
+        billing_mode: a.billing_mode === "per_call" ? "per_call" : "tokens",
+        input_price_per_million: a.input_price_per_million ?? 0,
+        output_price_per_million: a.output_price_per_million ?? 0,
+        cache_read_price_per_million: a.cache_read_price_per_million ?? 0,
+        per_call_usd: a.per_call_usd ?? 0,
+      }));
+      setModels((prev) => {
+        // Drop any partial entries for this alias first, then append all targets.
+        const filtered = prev.filter((m) => m.alias.toLowerCase() !== a.alias.toLowerCase());
+        return [...filtered, ...newRules];
+      });
+      setPrices((prev) => {
+        const next = { ...prev };
+        for (const tgt of a.targets) {
+          next[priceKey({ alias: a.alias, group: tgt.group })] = {
+            input_price_per_million: a.input_price_per_million ?? 0,
+            output_price_per_million: a.output_price_per_million ?? 0,
+            cache_read_price_per_million: a.cache_read_price_per_million ?? 0,
+            billing_mode: a.billing_mode === "per_call" ? "per_call" : "tokens",
+            per_call_usd: a.per_call_usd ?? 0,
+          };
+        }
+        return next;
+      });
+    }
+  }, [aliasSelected]);
 
   // LiteLLM price hints (community price table). Loaded once on mount, silent
   // failure: if null/inflight, the per-row "recommend" affordance simply isn't
@@ -528,6 +605,20 @@ export default function KeyForm({
         ))}
         <section className="kf-section mobile-only">
           <div className="section-label">{t("keyForm.mobile.sectionModels")}</div>
+          {globalAliases.length > 0 && (
+            <div className="form-row kf-alias-pick" style={{ marginBottom: 12 }}>
+              <div className="kf-alias-chips">
+                {globalAliases.map((a) => {
+                  const on = aliasSelected(a);
+                  return (
+                  <button key={a.alias} type="button" className={"kf-alias-chip" + (on ? " selected" : "")} onClick={() => toggleAlias(a)}>
+                    {a.alias}{a.targets.length > 1 ? ` (${a.targets.length})` : ""}
+                  </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="form-row" style={{ marginBottom: 12 }}>
             <ModelPicker initial={initial?.models} onChange={handleModelsChange} />
           </div>
@@ -661,6 +752,28 @@ export default function KeyForm({
           <span className="muted" style={{ fontSize: "0.85em", marginLeft: 8 }}>
             {t("keyForm.allowModelsHint")}
           </span>
+        </div>
+      )}
+
+      {globalAliases.length > 0 && (
+        <div className="form-row kf-alias-pick">
+          <label>{t("keyForm.existingAliases")}</label>
+          <div className="kf-alias-chips">
+            {globalAliases.map((a) => {
+              const on = aliasSelected(a);
+              return (
+              <button
+                key={a.alias}
+                type="button"
+                className={"kf-alias-chip" + (on ? " selected" : "")}
+                onClick={() => toggleAlias(a)}
+                title={a.targets.map((t) => `${t.provider}·${t.target_model}${t.group ? `·${t.group}` : ""}`).join("\n")}
+              >
+                {a.alias}{a.targets.length > 1 ? ` (${a.targets.length})` : ""}
+              </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
