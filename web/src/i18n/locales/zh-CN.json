@@ -253,7 +253,7 @@
       "builtinReadOnly": "只读",
       "builtinDesc": "内置规则始终在自定义规则之后运行，检测 plan_type 和 tier 字段",
       "custom": "自定义规则",
-      "matchCount": "匹配 {n} 个凭证",
+      "matchCount": "匹配 {{n}} 个凭证",
       "matchCountZero": "匹配 0 个凭证",
       "prevPage": "上一页",
       "nextPage": "下一页",

@@ -253,7 +253,7 @@
       "builtinReadOnly": "только чтение",
       "builtinDesc": "Встроенные правила запускаются после пользовательских, обнаруживая plan_type и tier",
       "custom": "Пользовательские правила",
-      "matchCount": "Совпадает {n}",
+      "matchCount": "Совпадает {{n}}",
       "matchCountZero": "Совпадений 0",
       "prevPage": "Назад",
       "nextPage": "Вперёд",

@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useT } from "../i18n";
-import type { AliasMapping, AliasTarget, ClassifyRule, ClassifyPreviewResponse } from "../types";
-import { fetchAliases, upsertAlias, deleteAlias, fetchClassifyRules, upsertClassifyRule, deleteClassifyRule, reorderClassifyRules } from "../api/mappings";
+import type { AliasMapping, AliasTarget, ClassifyRule, ClassifyPreviewResponse, CredentialDescriptor } from "../types";
+import { fetchAliases, upsertAlias, deleteAlias, fetchClassifyRules, upsertClassifyRule, deleteClassifyRule, reorderClassifyRules, classifyPreview, fetchCredentialDescriptors } from "../api/mappings";
 
 export default function Mapping() {
   const t = useT();
@@ -146,13 +146,20 @@ function ClassifyTab() {
   const [rules, setRules] = useState<ClassifyRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [previewData] = useState<ClassifyPreviewResponse | null>(null);
+  const [previewData, setPreviewData] = useState<ClassifyPreviewResponse | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await fetchClassifyRules();
+      const [list, descriptors] = await Promise.all([
+        fetchClassifyRules(),
+        fetchCredentialDescriptors().catch(() => [] as CredentialDescriptor[]),
+      ]);
       setRules(list);
+      // Evaluate the current rules against real credential descriptors so
+      // each rule card shows the true match count + file list.
+      const preview = await classifyPreview(descriptors).catch(() => null as ClassifyPreviewResponse | null);
+      setPreviewData(preview);
     } catch (e: unknown) {
       setError(String(e));
     } finally {
@@ -258,21 +265,16 @@ function RuleCard({
   const [page, setPage] = useState(0);
   const pageSize = 50;
 
-  // Load preview for this rule when expanded.
+  // Compute the match count + matched file list up front from previewData
+  // (fetched by ClassifyTab once the rules + descriptors load). The badge
+  // shows the count even when collapsed, so this must not be gated on
+  // `expanded`. Re-run whenever the preview or this rule's target group
+  // changes; the matchedFiles list drives the expanded detail pagination.
   useEffect(() => {
-    if (!expanded || matchCount !== null) return;
-    // In a real implementation, we'd fetch credential descriptors from the
-    // auth-files endpoint and call classifyPreview. For now, use previewData
-    // if available, or set 0.
-    if (previewData) {
-      const files = previewData.groups[rule.group.toLowerCase()] ?? [];
-      setMatchCount(files.length);
-      setMatchedFiles(files);
-    } else {
-      setMatchCount(0);
-      setMatchedFiles([]);
-    }
-  }, [expanded, matchCount, previewData, rule.group]);
+    const files = previewData?.groups[rule.group.toLowerCase()] ?? [];
+    setMatchCount(files.length);
+    setMatchedFiles(files);
+  }, [previewData, rule.group]);
 
   const pageCount = Math.ceil(matchedFiles.length / pageSize);
   const pageFiles = matchedFiles.slice(page * pageSize, (page + 1) * pageSize);

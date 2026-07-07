@@ -253,7 +253,7 @@
       "builtinReadOnly": "Read-only",
       "builtinDesc": "Built-in rules always run after custom rules, detecting plan_type and tier fields",
       "custom": "Custom Rules",
-      "matchCount": "Matches {n} credential(s)",
+      "matchCount": "Matches {{n}} credential(s)",
       "matchCountZero": "Matches 0 credentials",
       "prevPage": "Previous",
       "nextPage": "Next",
