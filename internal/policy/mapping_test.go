@@ -472,3 +472,158 @@ func TestAliasStatePersistence(t *testing.T) {
 		t.Fatalf("key Models not resolved from alias: %+v", key.Models)
 	}
 }
+
+// TestMultiTargetAliasNoDuplicateModelError reproduces the bug where a key
+// referencing a multi-target global alias had its Models expanded to multiple
+// ModelRules sharing the same alias name (one per target), then validation
+// rejected it as "duplicate model alias". With the fix, duplicate alias names
+// in key.Models are legitimate (per multi-target aliases) and the migration
+// produces a single deduped KeyAliasRef.
+func TestMultiTargetAliasNoDuplicateModelError(t *testing.T) {
+	yaml := []byte(`
+enabled: true
+state_file: "s.json"
+aliases:
+  - alias: tri
+    targets:
+      - {provider: openai, target_model: gpt-4o}
+      - {provider: anthropic, target_model: claude-3}
+      - {provider: google, target_model: gemini-pro}
+    dispatch: round-robin
+    billing_mode: tokens
+keys:
+  - id: k
+    enabled: true
+    key_hash: x
+    # The frontend submits Models (one per selected target), all sharing the
+    # alias name, since picker emits per-target ModelRules. This must NOT error.
+    models:
+      - {alias: tri, provider: openai, target_model: gpt-4o}
+      - {alias: tri, provider: anthropic, target_model: claude-3}
+      - {alias: tri, provider: google, target_model: gemini-pro}
+`)
+	cfg, err := DecodeConfig(yaml)
+	if err != nil {
+		t.Fatalf("decode should accept multi-target alias submit, got: %v", err)
+	}
+	// Migration should produce ONE deduped alias ref pointing at "tri".
+	if len(cfg.Keys[0].Aliases) != 1 || cfg.Keys[0].Aliases[0].Alias != "tri" {
+		t.Fatalf("expected single ref {tri}, got %+v", cfg.Keys[0].Aliases)
+	}
+	// Models should be cleared after migration.
+	if len(cfg.Keys[0].Models) != 0 {
+		t.Fatalf("Models should be cleared, got %d", len(cfg.Keys[0].Models))
+	}
+}
+
+// TestReloadStateWithDuplicateAliasRefSelfHeals reproduces the state-file
+// corruption produced by the pre-fix migration: a key with Aliases=[{test},
+// {test}] (duplicate refs created by the buggy migration). The fixed
+// normalization silently dedups the refs instead of erroring.
+func TestReloadStateWithDuplicateAliasRefSelfHeals(t *testing.T) {
+	yaml := []byte(`
+enabled: true
+state_file: "s.json"
+aliases:
+  - alias: test
+    targets:
+      - {provider: openai, target_model: gpt-4o}
+      - {provider: anthropic, target_model: claude-3}
+    dispatch: round-robin
+    billing_mode: tokens
+keys:
+  - id: k
+    enabled: true
+    key_hash: x
+    aliases:
+      - alias: test
+      - alias: test
+`)
+	cfg, err := DecodeConfig(yaml)
+	if err != nil {
+		t.Fatalf("duplicate alias ref should self-heal, got: %v", err)
+	}
+	// The deduped Aliases should be a single {test} entry.
+	if len(cfg.Keys[0].Aliases) != 1 || cfg.Keys[0].Aliases[0].Alias != "test" {
+		t.Fatalf("expected deduped single ref, got %+v", cfg.Keys[0].Aliases)
+	}
+}
+
+// TestReloadStateWithDiskModelsDuplicatesNoError reproduces the user's bug
+// "key gemma has duplicate model alias test": the on-disk state had the
+// derived Models persisted with duplicate alias entries (one per target of a
+// multi-target alias). The removed duplicate-model-alias check must accept
+// these Models + a populated Aliases slice without error.
+func TestReloadStateWithDiskModelsDuplicatesNoError(t *testing.T) {
+	yaml := []byte(`
+enabled: true
+state_file: "s.json"
+aliases:
+  - alias: test
+    targets:
+      - {provider: openai, target_model: gpt-4o}
+      - {provider: anthropic, target_model: claude-3}
+    dispatch: round-robin
+    billing_mode: tokens
+keys:
+  - id: gemma
+    enabled: true
+    key_hash: x
+    aliases:
+      - alias: test
+    # Simulated pre-fix persisted derived Models (one ModelRule per target,
+    # both with alias "test").
+    models:
+      - {alias: test, provider: openai, target_model: gpt-4o}
+      - {alias: test, provider: anthropic, target_model: claude-3}
+`)
+	cfg, err := DecodeConfig(yaml)
+	if err != nil {
+		t.Fatalf("disk Models with duplicate alias names should be accepted, got: %v", err)
+	}
+	// Migration leaves gemma's Models as-is (Aliases already set). The
+	// Configure-time resolution will overwrite them with freshly-resolved rules.
+	if len(cfg.Keys[0].Models) != 2 {
+		t.Fatalf("expected 2 disk Models intact (Configure overwrites later), got %d", len(cfg.Keys[0].Models))
+	}
+}
+
+// TestSaveStateStripsDerivedModels verifies that SaveState does NOT persist the
+// derived Models field (so reload never re-triggers validation problems). The
+// Configure path repopulates Models in memory from Aliases + global table.
+func TestSaveStateStripsDerivedModels(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	keys := []KeyConfig{{
+		ID: "k", Enabled: true, KeyHash: "x",
+		Aliases: []KeyAliasRef{{Alias: "test", InputPricePerMillion: ptrF(1.0)}},
+		Models: []ModelRule{
+			{Alias: "test", Provider: "openai", TargetModel: "gpt-4o"},
+			{Alias: "test", Provider: "anthropic", TargetModel: "claude-3"},
+		},
+	}}
+	if err := SaveState(path, keys, nil, []AliasMapping{{
+		Alias: "test", Targets: []AliasTarget{
+			{Provider: "openai", TargetModel: "gpt-4o"},
+			{Provider: "anthropic", TargetModel: "claude-3"},
+		},
+		Dispatch: "round-robin", BillingMode: "tokens",
+	}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(loaded.Keys))
+	}
+	if len(loaded.Keys[0].Models) != 0 {
+		t.Fatalf("SaveState must strip Models, got %+v", loaded.Keys[0].Models)
+	}
+	if len(loaded.Keys[0].Aliases) != 1 {
+		t.Fatalf("SaveState must keep Aliases, got %+v", loaded.Keys[0].Aliases)
+	}
+}
+
+func ptrF(v float64) *float64 { return &v }

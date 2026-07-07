@@ -317,37 +317,36 @@ func DecodeConfig(raw []byte) (Config, error) {
 
 // migrateModelsToAliases promotes per-key ModelRule entries to the global
 // AliasMapping table. For each key that has Models but no Aliases, each
-// ModelRule becomes a global alias (if not already present with the same
-// alias+provider+target_model) and the key gets a KeyAliasRef pointing to it.
-// Per-key pricing on the ModelRule is preserved as a price override on the
-// KeyAliasRef only when it differs from the global entry's pricing. After
-// migration, the key's Models slice is cleared (the canonical source becomes
-// Aliases). Keys that already have Aliases are left untouched.
+// ModelRule is looked up by ALIAS NAME in the global table (not the
+// full alias+provider+target_model tuple, so a multi-target alias already
+// defined in the global table is reused wholesale rather than split into
+// duplicate global aliases). If the alias name is unknown, a new single-
+// target alias is created from this ModelRule's target. Per-key refs are
+// deduped by alias name (a key referencing a multi-target alias gets ONE
+// ref, so resolveAliasRefsToModels expands it to all the alias's targets).
+// After migration, the key's Models slice is cleared (the canonical source
+// becomes Aliases). Keys that already have Aliases are left untouched.
 func migrateModelsToAliases(cfg *Config) {
 	if len(cfg.Keys) == 0 {
 		return
 	}
-	// Build an index of existing global aliases for dedup.
-	type aliasKey struct {
-		alias   string
-		provider string
-		model   string
-	}
-	existing := make(map[aliasKey]int) // maps to index in cfg.Aliases
+	// Index existing global aliases by ALIAS NAME (lowercased) so multi-
+	// target aliases already in the table are reused, not split.
+	existing := make(map[string]int) // alias name -> index in cfg.Aliases
 	for i, a := range cfg.Aliases {
-		for _, t := range a.Targets {
-			existing[aliasKey{strings.ToLower(a.Alias), strings.ToLower(t.Provider), strings.ToLower(t.TargetModel)}] = i
-		}
+		existing[strings.ToLower(a.Alias)] = i
 	}
 	for i := range cfg.Keys {
 		key := &cfg.Keys[i]
 		if len(key.Aliases) > 0 || len(key.Models) == 0 {
 			continue // already migrated or no models to migrate
 		}
+		refSeen := map[string]struct{}{} // dedup refs for THIS key by alias name
 		for _, m := range key.Models {
-			ak := aliasKey{strings.ToLower(m.Alias), strings.ToLower(m.Provider), strings.ToLower(m.TargetModel)}
+			al := strings.ToLower(m.Alias)
 			var ai int
-			if idx, ok := existing[ak]; ok {
+			if idx, ok := existing[al]; ok {
+				// Reuse the existing global alias without modifying its targets.
 				ai = idx
 			} else {
 				// Create a new global alias with this single target.
@@ -362,12 +361,20 @@ func migrateModelsToAliases(cfg *Config) {
 					CacheReadPricePerMillion: m.CacheReadPricePerMillion,
 					PerCallUSD:               m.PerCallUSD,
 				})
-				existing[ak] = ai
+				existing[al] = ai
 			}
-			// Build KeyAliasRef. We don't set price overrides here — the global
-			// entry's pricing was taken from the first ModelRule that created it,
-			// which is good enough for migration. Future per-key overrides are a
-			// manual UI action.
+			_ = ai // ai is the alias index; we don't need it below since the ref
+			//      carries the name and the key's resolveAliasRefsToModels
+			//      re-looks-up the alias by name at Configure time.
+			// Add a KeyAliasRef only once per alias name for this key.
+			if _, dup := refSeen[al]; dup {
+				continue
+			}
+			refSeen[al] = struct{}{}
+			// We don't set price overrides here — the global entry's pricing was
+			// taken from the ModelRule that first created (or defined) it, which
+			// is good enough for migration. Future per-key overrides are a manual
+			// UI action.
 			key.Aliases = append(key.Aliases, KeyAliasRef{Alias: m.Alias})
 		}
 		// Clear Models — the canonical source is now Aliases.
@@ -407,7 +414,6 @@ func normalizeConfig(cfg *Config) error {
 		if key.WeeklyLimitUSD < 0 {
 			return fmt.Errorf("key %q weekly_limit_usd cannot be negative", key.ID)
 		}
-		aliases := map[string]struct{}{}
 		for j := range key.Models {
 			model := &key.Models[j]
 			model.Alias = strings.TrimSpace(model.Alias)
@@ -417,11 +423,10 @@ func normalizeConfig(cfg *Config) error {
 			if model.Alias == "" || model.Provider == "" || model.TargetModel == "" {
 				return fmt.Errorf("key %q model entries require alias, provider, and target_model", key.ID)
 			}
-			aliasKey := strings.ToLower(model.Alias)
-			if _, exists := aliases[aliasKey]; exists {
-				return fmt.Errorf("key %q has duplicate model alias %q", key.ID, model.Alias)
-			}
-			aliases[aliasKey] = struct{}{}
+			// NOTE: duplicate alias names within a key's Models are LEGITIMATE
+			// for multi-target global aliases (resolveAliasRefsToModels emits
+			// one ModelRule per target, all sharing the alias name). Do not
+			// reject them; the pricing is unified at the alias level.
 			if model.InputPricePerMillion < 0 || model.OutputPricePerMillion < 0 || model.CacheReadPricePerMillion < 0 {
 				return fmt.Errorf("key %q model %q prices cannot be negative", key.ID, model.Alias)
 			}
@@ -526,20 +531,42 @@ func normalizeConfig(cfg *Config) error {
 	}
 	for i := range cfg.Keys {
 		key := &cfg.Keys[i]
-		refSeen := map[string]struct{}{}
+		refSeen := map[string]int{} // alias name -> index in key.Aliases (dedup)
+		refs := key.Aliases[:0]
 		for j := range key.Aliases {
 			ref := &key.Aliases[j]
 			ref.Alias = strings.TrimSpace(ref.Alias)
 			if ref.Alias == "" {
 				return fmt.Errorf("key %q alias ref %d: alias name is required", key.ID, j)
 			}
-			if _, exists := refSeen[strings.ToLower(ref.Alias)]; exists {
-				return fmt.Errorf("key %q has duplicate alias ref %q", key.ID, ref.Alias)
-			}
-			refSeen[strings.ToLower(ref.Alias)] = struct{}{}
-			if _, exists := aliasMap[strings.ToLower(ref.Alias)]; !exists {
+			lk := strings.ToLower(ref.Alias)
+			if _, exists := aliasMap[lk]; !exists {
 				return fmt.Errorf("key %q references unknown alias %q", key.ID, ref.Alias)
 			}
+			// Self-heal duplicate refs (from a pre-fix migration bug): keep the
+			// first, drop later duplicates, no error.
+			if firstIdx, dupLast := refSeen[lk]; dupLast {
+				// Preserve price overrides from the later ref if they exist.
+				if refs[firstIdx].InputPricePerMillion == nil && ref.InputPricePerMillion != nil {
+					refs[firstIdx].InputPricePerMillion = ref.InputPricePerMillion
+				}
+				if refs[firstIdx].OutputPricePerMillion == nil && ref.OutputPricePerMillion != nil {
+					refs[firstIdx].OutputPricePerMillion = ref.OutputPricePerMillion
+				}
+				if refs[firstIdx].CacheReadPricePerMillion == nil && ref.CacheReadPricePerMillion != nil {
+					refs[firstIdx].CacheReadPricePerMillion = ref.CacheReadPricePerMillion
+				}
+				if refs[firstIdx].PerCallUSD == nil && ref.PerCallUSD != nil {
+					refs[firstIdx].PerCallUSD = ref.PerCallUSD
+				}
+				continue
+			}
+			refSeen[lk] = len(refs)
+			refs = append(refs, *ref)
+		}
+		key.Aliases = refs
+		for k := range key.Aliases {
+			ref := &key.Aliases[k]
 			if ref.InputPricePerMillion != nil && *ref.InputPricePerMillion < 0 {
 				return fmt.Errorf("key %q alias %q input_price override cannot be negative", key.ID, ref.Alias)
 			}
@@ -596,7 +623,19 @@ func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState, alia
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
+	// Models is a DERIVED field (resolved from Aliases × global table via
+	// resolveAliasRefsToModels); the canonical source is Aliases. Persisting
+	// it would (a) make the on-disk state drift from the live in-memory copy
+	// when the global alias table is edited, and (b) re-trigger validation
+	// errors on reload — multi-target aliases expand to multiple ModelRules
+	// sharing one alias name, which legacy validation could not tolerate.
+	// Strip Models before marshalling; Configure repopulates it on load.
+	cleanKeys := make([]KeyConfig, len(keys))
+	for i := range keys {
+		cleanKeys[i] = keys[i]
+		cleanKeys[i].Models = nil
+	}
+	state := State{Version: 1, Keys: cleanKeys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -628,6 +667,12 @@ func SaveUsageOnly(path string, usage map[string]*UsageState) error {
 		keys = cur.Keys
 		aliases = cur.Aliases
 		rules = cur.ClassifyRules
+	}
+	// Strip the derived Models field from every key (see SaveState for why).
+	// On-disk Models may contain pre-fix duplicates from multi-target aliases;
+	// repersisting them would re-trigger the bug on the next reload.
+	for i := range keys {
+		keys[i].Models = nil
 	}
 	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
