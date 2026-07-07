@@ -53,6 +53,7 @@ export interface KeyPublic {
   key_preview: string;
   rpm: number;
   models: ModelRule[];
+  aliases?: KeyAliasRef[];
   daily_limit_usd: number;
   weekly_limit_usd: number;
   // Per-key override for GET /v1/models (see KeyFormValues).
@@ -69,6 +70,7 @@ export interface KeyWriteRequest {
   key?: string;
   rpm?: number;
   models?: ModelRule[];
+  aliases?: KeyAliasRef[];
   daily_limit_usd?: number;
   weekly_limit_usd?: number;
   allow_models_endpoint?: boolean;
@@ -139,4 +141,57 @@ export interface StatusResponse {
   key_count: number;
   rpm_usage?: Record<string, unknown>;
   sidecar?: { enabled: boolean; listen?: string; models_upstream_auth?: boolean };
+}
+
+// --- Advanced Mapping types ---
+
+// AliasTarget is one selectable destination for an alias.
+export interface AliasTarget {
+  provider: string;
+  target_model: string;
+  group?: string;
+}
+
+// AliasMapping is one entry in the global alias mapping table.
+export interface AliasMapping {
+  alias: string;
+  targets: AliasTarget[];
+  dispatch: "round-robin" | "priority";
+  billing_mode: "tokens" | "per_call";
+  input_price_per_million?: number;
+  output_price_per_million?: number;
+  cache_read_price_per_million?: number;
+  per_call_usd?: number;
+}
+
+// ClassifyRule is a user-defined credential classification rule.
+export interface ClassifyRule {
+  name: string;
+  field: string; // "filename" | "provider" | "plan_type" | "tier" | custom
+  pattern: string; // regex
+  group: string; // target group name
+  enabled: boolean;
+}
+
+// KeyAliasRef is a key's reference to a global alias, with optional per-key
+// price overrides (null = use global default).
+export interface KeyAliasRef {
+  alias: string;
+  input_price_per_million?: number | null;
+  output_price_per_million?: number | null;
+  cache_read_price_per_million?: number | null;
+  per_call_usd?: number | null;
+}
+
+// CredentialDescriptor is a normalized credential description for classify preview.
+export interface CredentialDescriptor {
+  id: string;
+  provider: string;
+  attributes?: Record<string, string>;
+}
+
+// ClassifyPreviewResponse is the result of POST /classify-preview.
+export interface ClassifyPreviewResponse {
+  groups: Record<string, string[]>; // group name → credential IDs
+  group_counts: Record<string, number>; // group name → count
 }

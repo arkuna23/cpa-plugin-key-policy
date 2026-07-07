@@ -233,7 +233,7 @@ func TestConfigureMergesInMemoryKeysNotOnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Simulate a stale disk snapshot: write a state containing only "on-disk".
-	if err := SaveState(path, []KeyConfig{{ID: "on-disk", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex"}}}}, nil); err != nil {
+	if err := SaveState(path, []KeyConfig{{ID: "on-disk", Enabled: true, KeyHash: hash, Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex"}}}}, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Reconfigure with the same path. The stale disk lacks "in-mem", which is

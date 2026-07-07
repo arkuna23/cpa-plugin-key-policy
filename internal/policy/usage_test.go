@@ -624,10 +624,13 @@ func TestAliasUsageBreakdown(t *testing.T) {
 	_ = store.RecordUsage("team-a", "slow", "o4-mini", false, UsageDetail{
 		InputTokens: 50_000, OutputTokens: 0,
 	})
-	// Update the key's models to ONLY fast (mirrors the management PATCH path:
+	// Update the key to ONLY fast (mirrors the management PATCH path:
 	// the alias is removed from config but the usage ledger keeps its history).
+	// In the new architecture, keys reference global aliases by name, so we
+	// update teamA.Aliases to only reference "fast".
 	teamA := store.Keys()[0]
-	teamA.Models = []ModelRule{fast}
+	teamA.Aliases = []KeyAliasRef{{Alias: "fast"}}
+	teamA.Models = nil
 	if err := store.UpsertKey(teamA, true); err != nil {
 		t.Fatal(err)
 	}

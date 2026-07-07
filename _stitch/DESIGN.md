@@ -71,8 +71,45 @@ The CPA management panel's mobile UI already uses a "Quiet Paper" light theme: a
 - Hover states use row-hover tint or border-hover; never move cards.
 - Tooltips allowed on icon buttons.
 
+## Mapping page (global alias mapping + credential classification)
+
+The mapping page is a standalone route `/mapping` with a two-tab layout at the top of the content area. Both tabs share the same page chrome (topnav + page title "映射管理" + tab strip). The tab strip is a horizontal segmented control: "别名映射" | "凭证归类". Active tab has accent underline; inactive tabs are muted.
+
+### Tab 1: 别名映射 (Alias Mapping)
+
+- Content is a card grid (same auto-fill minmax(320px, 1fr) as KeyList) of alias mapping cards.
+- A primary "新建别名" button sits in a toolbar row above the grid (right-aligned).
+- Each alias card:
+  - Header row: alias name (monospace, 15px, weight 600) on the left; a small dispatch-mode badge on the right ("轮询" or "优先", pill, muted-bg, 11px).
+  - Target list: each target is a row showing `provider · model` (monospace, 13px) + optional group chip ("free"/"team"/"custom", pill, muted-bg, 10px). Up to 3 rows shown, then "+N 更多目标" collapsed text.
+  - Pricing summary: one line, monospace 12px muted: "输入 $X.XX / 输出 $Y.YY / 缓存 $Z.ZZ per 1M" or "按次 $W.WW/次" when per_call.
+  - Reference count: "被 N 个密钥引用" (muted, 12px). If 0, show "未被引用".
+  - Hover action group at card footer: 编辑 / 删除. Delete is danger-colored and DISABLED when referenced by keys (show tooltip "被 N 个密钥引用").
+- Alias edit form (inline expand or modal): alias name input, dispatch mode radio (轮询/优先), target list with "+ 添加目标" button (jumps to ModelPicker standalone page), per-target removable chip, pricing section (billing mode toggle tokens/per_call + price inputs), save/cancel.
+
+### Tab 2: 凭证归类 (Credential Classification)
+
+- Content is a vertical list of rule cards (NOT a grid — full-width rows, stacked, max-width 800px centered).
+- A primary "新建规则" button sits in a toolbar row above the list.
+- Built-in rules section (top, read-only): a card labeled "内置规则（只读）" containing two rows:
+  - "plan_type → 组名" (field=plan_type, pattern=*, group=<detected>)
+  - "tier → 组名" (field=tier, pattern=*, group=<detected>)
+  These rows have no edit/delete buttons, just an info icon explaining they always run after custom rules.
+- Custom rules section (below, editable): ordered list, each rule card:
+  - Left: drag handle / up-down arrows for reordering.
+  - Main content: rule name (15px, weight 600) + subtitle line `字段: 正则 → 组名` (monospace, 13px, muted).
+  - Right: match count badge ("匹配 N 个凭证", pill, accent-soft bg, accent text, 12px) + enable/disable toggle (.switch) + edit button + delete button.
+  - Expandable detail: clicking the card or a chevron expands a panel showing the matched credential file names in a paginated list (50 per page, page navigation at bottom). Each file name row: monospace 13px, muted, with provider chip.
+- Rule edit form: rule name input, field dropdown (filename/provider/plan_type/tier/自定义...) + custom field input when "自定义" selected, regex pattern input (monospace, with live compile validation — red border + error message if invalid), target group name input, enable toggle, save/cancel.
+
+### UI copy (Chinese)
+- Page title: 映射管理
+- Tabs: 别名映射, 凭证归类
+- Alias tab: 新建别名, 编辑, 删除, 轮询, 优先, 被N个密钥引用, 未被引用, 添加目标, 输入, 输出, 缓存, 按次
+- Classify tab: 新建规则, 内置规则, 匹配N个凭证, 编辑, 删除, 字段, 正则, 组名, 启用, 禁用, 上一页, 下一页, 自定义
+- Nav item: 映射
 ## UI copy language
-- All UI copy in Chinese (zh-CN) to match the existing i18n. Use these exact labels:
+- All UI copy in Chinese (zh-CN) to match the existing i18n.
   - App title area: "CPA Key Management"
   - Nav: "Key List" = mi-yao-lie-biao, "New Key" = xin-jian-mi-yao, "Logout" = tui-chu-deng-lu
   - Toolbar buttons: "New Key" (primary), "Refresh" = shua-xin

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,14 @@ type Config struct {
 	Enabled   bool        `yaml:"enabled" json:"enabled"`
 	StateFile string      `yaml:"state_file" json:"state_file"`
 	Keys      []KeyConfig `yaml:"keys" json:"keys"`
+	// Aliases is the global alias mapping table. Each entry maps a downstream
+	// alias name to one or more (provider, model, group) targets with a shared
+	// pricing config. Keys reference aliases by name via KeyAliasRef.
+	Aliases []AliasMapping `yaml:"aliases,omitempty" json:"aliases,omitempty"`
+	// ClassifyRules are user-defined credential classification rules. They run
+	// BEFORE the built-in plan_type/tier detection and can override it. Built-in
+	// rules (always present, read-only) handle unrecognized credentials.
+	ClassifyRules []ClassifyRule `yaml:"classify_rules,omitempty" json:"classify_rules,omitempty"`
 	// Sidecar optionally listens on Listen and reverse-proxies to Upstream (CPA).
 	// GET /v1/models is filtered to the downstream key's configured aliases.
 	Sidecar SidecarConfig `yaml:"sidecar,omitempty" json:"sidecar,omitempty"`
@@ -37,6 +46,12 @@ type KeyConfig struct {
 	KeyPreview string      `yaml:"key_preview" json:"key_preview"`
 	RPM        int         `yaml:"rpm" json:"rpm"`
 	Models     []ModelRule `yaml:"models" json:"models"`
+	// Aliases references global alias mappings by name. When non-empty, the key
+	// uses these aliases for routing and billing. Per-key price overrides are
+	// optional (nil = use global alias pricing). This field coexists with
+	// Models during migration: if Aliases is empty and Models is non-empty,
+	// normalizeConfig auto-migrates Models → global Aliases + KeyAliasRef.
+	Aliases []KeyAliasRef `yaml:"aliases,omitempty" json:"aliases,omitempty"`
 	// AllowModelsEndpoint lets this key reach GET /v1/models. CPA has no way
 	// for a plugin to filter the model list per downstream key (OpenAIModels
 	// returns the global registry and never goes through an executor or
@@ -88,6 +103,69 @@ type ModelRule struct {
 	// increments for reporting). Negative is rejected by normalizeConfig. Only
 	// meaningful under "per_call"; ignored under "tokens".
 	PerCallUSD float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
+}
+
+// AliasMapping is one entry in the global alias mapping table. It maps a
+// downstream alias name to one or more targets (provider+model+group) with a
+// shared pricing config. When a key references this alias, requests for the
+// alias are routed to one of the targets based on the dispatch mode.
+type AliasMapping struct {
+	Alias       string        `yaml:"alias" json:"alias"`
+	Targets     []AliasTarget `yaml:"targets" json:"targets"`
+	Dispatch    string        `yaml:"dispatch,omitempty" json:"dispatch,omitempty"` // "round-robin" (default) | "priority"
+	BillingMode string        `yaml:"billing_mode,omitempty" json:"billing_mode,omitempty"`
+	// Pricing fields (same semantics as ModelRule). When BillingMode == "tokens",
+	// InputPricePerMillion / OutputPricePerMillion / CacheReadPricePerMillion
+	// are used. When BillingMode == "per_call", PerCallUSD is used.
+	InputPricePerMillion     float64 `yaml:"input_price_per_million,omitempty" json:"input_price_per_million,omitempty"`
+	OutputPricePerMillion    float64 `yaml:"output_price_per_million,omitempty" json:"output_price_per_million,omitempty"`
+	CacheReadPricePerMillion float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
+	PerCallUSD               float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
+}
+
+// AliasTarget is one selectable destination for an alias. Group optionally
+// narrows which auth files serve this target (codex plan_type, antigravity
+// tier, or a custom group from ClassifyRules). Empty = any file for the
+// provider (legacy behavior).
+type AliasTarget struct {
+	Provider    string `yaml:"provider" json:"provider"`
+	TargetModel string `yaml:"target_model" json:"target_model"`
+	Group       string `yaml:"group,omitempty" json:"group,omitempty"`
+}
+
+// ClassifyRule is a user-defined credential classification rule. It matches
+// a field on the auth candidate (filename, provider, plan_type, tier, or any
+// custom attribute) against a regex pattern, and assigns matching candidates
+// to a named group. Rules run in order; the first match wins (a credential can
+// belong to multiple groups when multiple rules match — multi-group semantics).
+// Custom rules run BEFORE the built-in plan_type/tier detection, so they can
+// override the default classification.
+type ClassifyRule struct {
+	Name    string `yaml:"name" json:"name"`
+	Field   string `yaml:"field" json:"field"`   // "filename" | "provider" | "plan_type" | "tier" | custom attribute name
+	Pattern string `yaml:"pattern" json:"pattern"` // regex (Go syntax)
+	Group   string `yaml:"group" json:"group"`   // target group name
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	// compiled is the pre-compiled regex, set by normalizeConfig for fast
+	// evaluation. Not serialized.
+	compiled *regexp.Regexp `yaml:"-" json:"-"`
+}
+
+// Compiled returns the pre-compiled regex, or nil if not yet compiled.
+func (r *ClassifyRule) Compiled() *regexp.Regexp {
+	return r.compiled
+}
+
+// KeyAliasRef is a key's reference to a global alias. The key uses the alias's
+// targets and dispatch mode, but can optionally override pricing per-key.
+// nil pointer fields mean "use the global default".
+type KeyAliasRef struct {
+	Alias string `yaml:"alias" json:"alias"`
+	// Optional per-key price overrides. nil = use global alias pricing.
+	InputPricePerMillion     *float64 `yaml:"input_price_per_million,omitempty" json:"input_price_per_million,omitempty"`
+	OutputPricePerMillion    *float64 `yaml:"output_price_per_million,omitempty" json:"output_price_per_million,omitempty"`
+	CacheReadPricePerMillion *float64 `yaml:"cache_read_price_per_million,omitempty" json:"cache_read_price_per_million,omitempty"`
+	PerCallUSD               *float64 `yaml:"per_call_usd,omitempty" json:"per_call_usd,omitempty"`
 }
 
 // UsageState holds per-key dollar usage accounting persisted in the state JSON.
@@ -205,6 +283,12 @@ type State struct {
 	Keys      []KeyConfig            `json:"keys"`
 	Usage     map[string]*UsageState `json:"usage,omitempty"`
 	UpdatedAt time.Time              `json:"updated_at"`
+	// Aliases is the global alias mapping table, persisted so that key alias
+	// references survive restarts even when config.yaml is not re-read. On
+	// Configure, the config.yaml Aliases take precedence; state Aliases are a
+	// fallback for the state-only reload path (e.g. FlushUsage recovery).
+	Aliases      []AliasMapping `json:"aliases,omitempty"`
+	ClassifyRules []ClassifyRule `json:"classify_rules,omitempty"`
 }
 
 func DefaultConfig() Config {
@@ -231,7 +315,72 @@ func DecodeConfig(raw []byte) (Config, error) {
 	return cfg, nil
 }
 
+// migrateModelsToAliases promotes per-key ModelRule entries to the global
+// AliasMapping table. For each key that has Models but no Aliases, each
+// ModelRule becomes a global alias (if not already present with the same
+// alias+provider+target_model) and the key gets a KeyAliasRef pointing to it.
+// Per-key pricing on the ModelRule is preserved as a price override on the
+// KeyAliasRef only when it differs from the global entry's pricing. After
+// migration, the key's Models slice is cleared (the canonical source becomes
+// Aliases). Keys that already have Aliases are left untouched.
+func migrateModelsToAliases(cfg *Config) {
+	if len(cfg.Keys) == 0 {
+		return
+	}
+	// Build an index of existing global aliases for dedup.
+	type aliasKey struct {
+		alias   string
+		provider string
+		model   string
+	}
+	existing := make(map[aliasKey]int) // maps to index in cfg.Aliases
+	for i, a := range cfg.Aliases {
+		for _, t := range a.Targets {
+			existing[aliasKey{strings.ToLower(a.Alias), strings.ToLower(t.Provider), strings.ToLower(t.TargetModel)}] = i
+		}
+	}
+	for i := range cfg.Keys {
+		key := &cfg.Keys[i]
+		if len(key.Aliases) > 0 || len(key.Models) == 0 {
+			continue // already migrated or no models to migrate
+		}
+		for _, m := range key.Models {
+			ak := aliasKey{strings.ToLower(m.Alias), strings.ToLower(m.Provider), strings.ToLower(m.TargetModel)}
+			var ai int
+			if idx, ok := existing[ak]; ok {
+				ai = idx
+			} else {
+				// Create a new global alias with this single target.
+				ai = len(cfg.Aliases)
+				cfg.Aliases = append(cfg.Aliases, AliasMapping{
+					Alias:       m.Alias,
+					Targets:     []AliasTarget{{Provider: m.Provider, TargetModel: m.TargetModel, Group: m.Group}},
+					Dispatch:    "round-robin",
+					BillingMode: m.BillingMode,
+					InputPricePerMillion:     m.InputPricePerMillion,
+					OutputPricePerMillion:    m.OutputPricePerMillion,
+					CacheReadPricePerMillion: m.CacheReadPricePerMillion,
+					PerCallUSD:               m.PerCallUSD,
+				})
+				existing[ak] = ai
+			}
+			// Build KeyAliasRef. We don't set price overrides here — the global
+			// entry's pricing was taken from the first ModelRule that created it,
+			// which is good enough for migration. Future per-key overrides are a
+			// manual UI action.
+			key.Aliases = append(key.Aliases, KeyAliasRef{Alias: m.Alias})
+		}
+		// Clear Models — the canonical source is now Aliases.
+		key.Models = nil
+	}
+}
+
 func normalizeConfig(cfg *Config) error {
+	// Auto-migrate: when a key has per-key Models but no Aliases, promote
+	// Models to the global alias table and convert the key to reference aliases.
+	// This runs on every normalizeConfig call (DecodeConfig, Configure, state
+	// load) so old configs and old state files are always migrated.
+	migrateModelsToAliases(cfg)
 	seen := map[string]struct{}{}
 	for i := range cfg.Keys {
 		key := &cfg.Keys[i]
@@ -290,6 +439,122 @@ func normalizeConfig(cfg *Config) error {
 			}
 		}
 	}
+
+	// --- Global alias mapping table validation ---
+	aliasSeen := map[string]struct{}{}
+	for i := range cfg.Aliases {
+		a := &cfg.Aliases[i]
+		a.Alias = strings.TrimSpace(a.Alias)
+		if a.Alias == "" {
+			return fmt.Errorf("alias entry %d: alias name is required", i)
+		}
+		if _, exists := aliasSeen[strings.ToLower(a.Alias)]; exists {
+			return fmt.Errorf("duplicate alias name %q", a.Alias)
+		}
+		aliasSeen[strings.ToLower(a.Alias)] = struct{}{}
+		if len(a.Targets) == 0 {
+			return fmt.Errorf("alias %q must have at least one target", a.Alias)
+		}
+		for j := range a.Targets {
+			t := &a.Targets[j]
+			t.Provider = strings.ToLower(strings.TrimSpace(t.Provider))
+			t.TargetModel = strings.TrimSpace(t.TargetModel)
+			t.Group = strings.ToLower(strings.TrimSpace(t.Group))
+			if t.Provider == "" || t.TargetModel == "" {
+				return fmt.Errorf("alias %q target %d: provider and target_model are required", a.Alias, j)
+			}
+		}
+		switch strings.ToLower(strings.TrimSpace(a.Dispatch)) {
+		case "", "round-robin":
+			a.Dispatch = "round-robin"
+		case "priority":
+			a.Dispatch = "priority"
+		default:
+			return fmt.Errorf("alias %q dispatch %q must be \"round-robin\" or \"priority\"", a.Alias, a.Dispatch)
+		}
+		switch strings.ToLower(strings.TrimSpace(a.BillingMode)) {
+		case "", "tokens":
+			a.BillingMode = "tokens"
+		case "per_call":
+			a.BillingMode = "per_call"
+		default:
+			return fmt.Errorf("alias %q billing_mode %q must be \"tokens\" or \"per_call\"", a.Alias, a.BillingMode)
+		}
+		if a.InputPricePerMillion < 0 || a.OutputPricePerMillion < 0 || a.CacheReadPricePerMillion < 0 {
+			return fmt.Errorf("alias %q prices cannot be negative", a.Alias)
+		}
+		if a.PerCallUSD < 0 {
+			return fmt.Errorf("alias %q per_call_usd cannot be negative", a.Alias)
+		}
+	}
+
+	// --- Classification rules validation ---
+	ruleSeen := map[string]struct{}{}
+	for i := range cfg.ClassifyRules {
+		r := &cfg.ClassifyRules[i]
+		r.Name = strings.TrimSpace(r.Name)
+		r.Field = strings.TrimSpace(r.Field)
+		r.Pattern = strings.TrimSpace(r.Pattern)
+		r.Group = strings.TrimSpace(r.Group)
+		if r.Name == "" {
+			return fmt.Errorf("classify rule %d: name is required", i)
+		}
+		if _, exists := ruleSeen[strings.ToLower(r.Name)]; exists {
+			return fmt.Errorf("duplicate classify rule name %q", r.Name)
+		}
+		ruleSeen[strings.ToLower(r.Name)] = struct{}{}
+		if r.Field == "" {
+			return fmt.Errorf("classify rule %q: field is required", r.Name)
+		}
+		if r.Pattern == "" {
+			return fmt.Errorf("classify rule %q: pattern is required", r.Name)
+		}
+		if r.Group == "" {
+			return fmt.Errorf("classify rule %q: group is required", r.Name)
+		}
+		re, err := regexp.Compile(r.Pattern)
+		if err != nil {
+			return fmt.Errorf("classify rule %q: invalid regex %q: %w", r.Name, r.Pattern, err)
+		}
+		r.compiled = re
+	}
+
+	// --- Key alias references validation ---
+	aliasMap := make(map[string]*AliasMapping, len(cfg.Aliases))
+	for i := range cfg.Aliases {
+		aliasMap[strings.ToLower(cfg.Aliases[i].Alias)] = &cfg.Aliases[i]
+	}
+	for i := range cfg.Keys {
+		key := &cfg.Keys[i]
+		refSeen := map[string]struct{}{}
+		for j := range key.Aliases {
+			ref := &key.Aliases[j]
+			ref.Alias = strings.TrimSpace(ref.Alias)
+			if ref.Alias == "" {
+				return fmt.Errorf("key %q alias ref %d: alias name is required", key.ID, j)
+			}
+			if _, exists := refSeen[strings.ToLower(ref.Alias)]; exists {
+				return fmt.Errorf("key %q has duplicate alias ref %q", key.ID, ref.Alias)
+			}
+			refSeen[strings.ToLower(ref.Alias)] = struct{}{}
+			if _, exists := aliasMap[strings.ToLower(ref.Alias)]; !exists {
+				return fmt.Errorf("key %q references unknown alias %q", key.ID, ref.Alias)
+			}
+			if ref.InputPricePerMillion != nil && *ref.InputPricePerMillion < 0 {
+				return fmt.Errorf("key %q alias %q input_price override cannot be negative", key.ID, ref.Alias)
+			}
+			if ref.OutputPricePerMillion != nil && *ref.OutputPricePerMillion < 0 {
+				return fmt.Errorf("key %q alias %q output_price override cannot be negative", key.ID, ref.Alias)
+			}
+			if ref.CacheReadPricePerMillion != nil && *ref.CacheReadPricePerMillion < 0 {
+				return fmt.Errorf("key %q alias %q cache_read_price override cannot be negative", key.ID, ref.Alias)
+			}
+			if ref.PerCallUSD != nil && *ref.PerCallUSD < 0 {
+				return fmt.Errorf("key %q alias %q per_call_usd override cannot be negative", key.ID, ref.Alias)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -327,11 +592,11 @@ func LoadState(path string) (*State, error) {
 }
 
 // SaveState atomically writes the key list plus usage ledger to the state file.
-func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState) error {
+func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC()}
+	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -357,10 +622,14 @@ func SaveUsageOnly(path string, usage map[string]*UsageState) error {
 		return err
 	}
 	var keys []KeyConfig
+	var aliases []AliasMapping
+	var rules []ClassifyRule
 	if cur, err := LoadState(path); err == nil {
 		keys = cur.Keys
+		aliases = cur.Aliases
+		rules = cur.ClassifyRules
 	}
-	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC()}
+	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
