@@ -8,7 +8,7 @@ import KeyNew from "./pages/KeyNew";
 import KeyEdit from "./pages/KeyEdit";
 import KeyUsage from "./pages/KeyUsage";
 import ModelPick from "./pages/ModelPick";
-import Mapping from "./pages/Mapping";
+import Mapping, { AliasEditForm, RuleEditForm } from "./pages/Mapping";
 
 function useAuthTick() {
   const [, setTick] = useState(0);
@@ -94,8 +94,8 @@ function Shell() {
         <Route path="/keys/:id/edit/models" element={<ModelPick />} />
         <Route path="/keys/:id/usage" element={<KeyUsage />} />
         <Route path="/mapping" element={<Mapping />} />
-        <Route path="/mapping/alias/:aliasName" element={<Mapping mode="aliasEdit" />} />
-        <Route path="/mapping/rule/:ruleName" element={<Mapping mode="ruleEdit" />} />
+        <Route path="/mapping/alias/:aliasName" element={<AliasEditForm />} />
+        <Route path="/mapping/rule/:ruleName" element={<RuleEditForm />} />
         <Route path="*" element={<Navigate to="/keys" replace />} />
       </Routes>
     </div>

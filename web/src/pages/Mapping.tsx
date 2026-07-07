@@ -4,16 +4,10 @@ import { useT } from "../i18n";
 import type { AliasMapping, AliasTarget, ClassifyRule, ClassifyPreviewResponse } from "../types";
 import { fetchAliases, upsertAlias, deleteAlias, fetchClassifyRules, upsertClassifyRule, deleteClassifyRule, reorderClassifyRules } from "../api/mappings";
 
-type Mode = "list" | "aliasEdit" | "ruleEdit";
-
-export default function Mapping({ mode = "list" }: { mode?: Mode }) {
+export default function Mapping() {
   const t = useT();
   const loc = useLocation();
   const [tab, setTab] = useState<"alias" | "classify">("alias");
-
-  // If we're in an edit mode, render the edit form instead.
-  if (mode === "aliasEdit") return <AliasEditForm />;
-  if (mode === "ruleEdit") return <RuleEditForm />;
 
   // Pick up returned state (new targets from ModelPick, etc.)
   useEffect(() => {
@@ -340,7 +334,7 @@ function RuleCard({
 
 // --- Alias Edit Form ---
 
-function AliasEditForm() {
+export function AliasEditForm() {
   const t = useT();
   const nav = useNavigate();
   const { aliasName } = useParams();
@@ -529,7 +523,7 @@ function AliasEditForm() {
 
 // --- Rule Edit Form ---
 
-function RuleEditForm() {
+export function RuleEditForm() {
   const t = useT();
   const nav = useNavigate();
   const { ruleName } = useParams();
