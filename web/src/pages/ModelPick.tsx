@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useLocation, Link } from "react-router-dom";
 import { fetchCatalog, groupByCatalog } from "../api/models";
 import type { CatalogGroup } from "../api/models";
-import type { ModelRule } from "../types";
+import type { ModelRule, AliasTarget } from "../types";
 import { useT } from "../i18n";
 
 // Tier label: known tiers get a localized name; anything unrecognized falls
@@ -33,14 +33,26 @@ export default function ModelPick() {
 
   // Initial selection comes from router state (passed by KeyForm when it
   // navigates here). Edit-mode keys pass their current models in too.
-  const initial = (loc.state as { models?: ModelRule[] } | null)?.models ?? [];
-  const backTo = id ? `/keys/${encodeURIComponent(id)}/edit` : "/keys/new";
+  const st = loc.state as { models?: ModelRule[]; currentTargets?: AliasTarget[]; returnTo?: string } | null;
+  // Context-aware: if a `returnTo` route is supplied (e.g. from the alias
+  // editor), we are picking targets for a global alias, not models for a key.
+  const aliasMode = !!st?.returnTo;
+  const initialModels = st?.models ?? [];
+  const initialTargets = st?.currentTargets ?? [];
+  const backTo = aliasMode
+    ? st!.returnTo!
+    : (id ? `/keys/${encodeURIComponent(id)}/edit` : "/keys/new");
 
   const [selected, setSelected] = useState<Set<string>>(() => {
     const s = new Set<string>();
-    for (const r of initial) {
+    for (const r of initialModels) {
       const g = (r.group ?? "").toLowerCase();
       s.add(r.provider.toLowerCase() + "|" + g + "|" + r.target_model.toLowerCase());
+    }
+    // Alias targets carry provider + target_model + optional group.
+    for (const tg of initialTargets) {
+      const g = (tg.group ?? "").toLowerCase();
+      s.add(tg.provider.toLowerCase() + "|" + g + "|" + tg.target_model.toLowerCase());
     }
     return s;
   });
@@ -51,11 +63,11 @@ export default function ModelPick() {
       setLoading(true);
       setError("");
       try {
-        // Keep providers already bound to this key visible even if their
-        // credential has since been removed (edit-mode prefill).
-        const selectedProviders = new Set(
-          initial.map((r) => r.provider.toLowerCase()),
-        );
+        // Keep providers already bound to this key (or alias) visible even
+        // if their credential has since been removed (edit-mode prefill).
+        const selectedProviders = new Set<string>();
+        for (const r of initialModels) selectedProviders.add(r.provider.toLowerCase());
+        for (const r of initialTargets) selectedProviders.add(r.provider.toLowerCase());
         const cat = await fetchCatalog(selectedProviders);
         if (!alive) return;
         setGroups(groupByCatalog(cat));
@@ -137,9 +149,18 @@ export default function ModelPick() {
   };
 
   const finish = () => {
-    // Hand the selection back to the form via router state. The form reads
-    // loc.state.models on mount/return to repopulate its model list.
-    nav(backTo, { state: { pickedModels: rules } });
+    // Context-aware: in alias mode, hand back AliasTarget[] as
+    // `pickedTargets`; in key mode, hand back ModelRule[] as `pickedModels`.
+    if (aliasMode) {
+      const targets: AliasTarget[] = rules.map((r) => {
+        const t: AliasTarget = { provider: r.provider, target_model: r.target_model };
+        if (r.group) t.group = r.group;
+        return t;
+      });
+      nav(backTo, { state: { pickedTargets: targets } });
+    } else {
+      nav(backTo, { state: { pickedModels: rules } });
+    }
   };
 
   return (

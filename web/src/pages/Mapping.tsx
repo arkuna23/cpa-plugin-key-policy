@@ -384,8 +384,10 @@ export function AliasEditForm() {
   };
 
   const addTarget = () => {
-    // Navigate to ModelPick to select a target (provider+model+group).
-    nav("/keys/new/models", { state: { returnTo: `/mapping/alias/${isNew ? "new" : encodeURIComponent(alias.alias)}`, currentTargets: alias.targets } });
+    // Navigate to the alias-target picker. It returns with `pickedTargets`
+    // in router state and the `returnTo` URL so it knows to route back here.
+    const here = `/mapping/alias/${isNew ? "new" : encodeURIComponent(alias.alias)}`;
+    nav("/mapping/pick-target", { state: { returnTo: here, currentTargets: alias.targets } });
   };
 
   const removeTarget = (idx: number) => {
