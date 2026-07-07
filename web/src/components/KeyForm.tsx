@@ -315,6 +315,16 @@ export default function KeyForm({
 
   const renderPriceEditor = (m: ModelRule, layout: "table" | "mobile") => {
     const key = priceKey(m);
+    // All ModelRules sharing this (group|alias) key — for a multi-target
+    // global alias they all share one unified price row. The desktop table
+    // renders one row per unique key (see the body filter below) and shows
+    // the aggregated provider/group set so the user sees it's one unified
+    // price across multiple targets, not a per-target price.
+    const sameKey = models.filter((x) => priceKey(x) === key);
+    const isMulti = sameKey.length > 1;
+      const providersUnion = Array.from(new Set(sameKey.map((x) => x.provider))).join(", ");
+      const groupsUnionRaw = Array.from(new Set(sameKey.map((x) => (x.group ?? "").trim()).filter(Boolean)));
+      const groupsUnion = groupsUnionRaw.length ? groupsUnionRaw.join(", ") : "—";
     const row = prices[key] ?? {
       input_price_per_million: 0,
       output_price_per_million: 0,
@@ -323,7 +333,10 @@ export default function KeyForm({
       per_call_usd: 0,
     };
     const perCall = row.billing_mode === "per_call";
-    const hint = priceTable ? lookupPrice(priceTable, m.target_model) : null;
+    // Community price hint only makes sense for a single target (one
+    // target_model); for multi-target aliases the price is unified across
+    // different models so auto-fill is meaningless.
+    const hint = priceTable && !isMulti ? lookupPrice(priceTable, m.target_model) : null;
 
     if (layout === "mobile") {
       return (
@@ -414,9 +427,9 @@ export default function KeyForm({
     return (
       <Fragment key={key}>
         <tr>
-          <td className="mono">{m.alias}</td>
-          <td className="muted">{m.provider}</td>
-          <td className="muted">{m.group ?? "—"}</td>
+          <td className="mono">{m.alias}{isMulti ? ` (${sameKey.length})` : ""}</td>
+          <td className="muted">{isMulti ? providersUnion : m.provider}</td>
+          <td className="muted">{isMulti ? groupsUnion : (m.group ?? "—")}</td>
           <td>
             <label className="switch" title={t("keyForm.billingModeTitle")}>
               <input
@@ -821,7 +834,10 @@ export default function KeyForm({
                 </tr>
               </thead>
               <tbody>
-                {models.map((m) => renderPriceEditor(m, "table"))}
+                {/* Per-alias unified pricing: dedupe by priceKey so a
+                    multi-target global alias renders ONE unified price row
+                    (aggregated provider/group show the targets it covers). */}
+                {models.filter((m, i, arr) => arr.findIndex((x) => priceKey(x) === priceKey(m)) === i).map((m) => renderPriceEditor(m, "table"))}
               </tbody>
             </table>
           </div>
