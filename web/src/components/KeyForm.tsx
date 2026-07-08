@@ -633,7 +633,24 @@ export default function KeyForm({
             </div>
           )}
           <div className="form-row" style={{ marginBottom: 12 }}>
-            <ModelPicker initial={initial?.models} onChange={handleModelsChange} />
+            {pickPath ? (
+              <div className="model-chips-box">
+                {models.length === 0 && <span className="mc-empty">{t("keyForm.modelsEmpty")}</span>}
+                {models.map((m) => (
+                  <span key={priceKey(m)} className="mc-chip">
+                    {m.alias}{m.group ? " · " + m.group : ""}
+                    <button type="button" className="mc-x" onClick={() => {
+                      setModels((prev) => prev.filter((x) => priceKey(x) !== priceKey(m)));
+                    }} aria-label={t("keyForm.removeModel")}>×</button>
+                  </span>
+                ))}
+                <button type="button" className="mc-add" onClick={() => nav(pickPath, { state: { models } })}>
+                  + {t("keyForm.addModel")}
+                </button>
+              </div>
+            ) : (
+              <ModelPicker initial={initial?.models} onChange={handleModelsChange} />
+            )}
           </div>
           {models.length > 0 && (
             <div className="kf-model-list">
