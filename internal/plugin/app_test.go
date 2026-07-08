@@ -771,3 +771,32 @@ func routeResponseFromEnvelope(t *testing.T, raw []byte) ModelRouteResponse {
 	}
 	return resp
 }
+
+// TestResolveProviderKey verifies the openai-compatible- prefix mapping so
+// CPA's HasBuiltinProvider check succeeds for OpenAI-compatibility providers.
+// Reproduces the 502 bug: CPA log "model router returned unavailable
+// provider" when the plugin returned the bare provider name "nvidia".
+func TestResolveProviderKey(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		avail    []string
+		want     string
+	}{
+		{"bare matches built-in", "codex", []string{"codex", "claude"}, "codex"},
+		{"nvidia openai-compat", "nvidia", []string{"openai-compatible-nvidia", "openai-compatible-opencode", "cerebras"}, "openai-compatible-nvidia"},
+		{"opencode openai-compat", "opencode", []string{"openai-compatible-nvidia", "openai-compatible-opencode"}, "openai-compatible-opencode"},
+		{"cerebras openai-compat", "cerebras", []string{"openai-compatible-cerebras"}, "openai-compatible-cerebras"},
+		{"no available → bare fallback", "nvidia", nil, "nvidia"},
+		{"not in available → bare", "custom", []string{"openai-compatible-x"}, "custom"},
+		{"empty", "", []string{"codex"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveProviderKey(tc.provider, tc.avail)
+			if got != tc.want {
+				t.Fatalf("resolveProviderKey(%q, %v) = %q, want %q", tc.provider, tc.avail, got, tc.want)
+			}
+		})
+	}
+}

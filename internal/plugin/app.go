@@ -200,10 +200,44 @@ func (a *App) routeModel(raw []byte) ([]byte, error) {
 	return OKEnvelope(ModelRouteResponse{
 		Handled:     true,
 		TargetKind:  "provider",
-		Target:      rule.Provider,
+		Target:      resolveProviderKey(rule.Provider, req.AvailableProviders),
 		TargetModel: rule.TargetModel,
 		Reason:      "cpa-key-policy:" + keyID,
 	})
+}
+
+// resolveProviderKey maps a ModelRule's provider to the provider key CPA's
+// auth manager uses, so HasBuiltinProvider(target) succeeds.
+//
+// OpenAI-compatibility providers are registered with auth.Provider
+// prefixed as "openai-compatible-<name>" (see synthesizer.config:
+// auth.Provider = OpenAICompatibleProviderKey(name)). The plugin's
+// ModelRule.Provider field carries the bare name (e.g. "nvidia",
+// "opencode"). Returning the bare name makes CPA skip the router
+// ("model router returned unavailable provider") and fall back to the
+// native path, which fails for non-native alias names like "test1".
+//
+// We pick the key present in AvailableProviders, trying the bare name
+// first (for built-in providers like codex/claude/gemini) then the
+// openai-compatible- prefixed form. If neither matches we return the
+// bare name and let CPA's availability check skip us (the native path
+// still resolves true model names).
+func resolveProviderKey(provider string, availableProviders []string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	if p == "" {
+		return p
+	}
+	if len(availableProviders) == 0 {
+		return p
+	}
+	for _, candidate := range []string{p, "openai-compatible-" + p} {
+		for _, avail := range availableProviders {
+			if strings.EqualFold(candidate, avail) {
+				return candidate
+			}
+		}
+	}
+	return p
 }
 
 func (a *App) interceptResponse(raw []byte) ([]byte, error) {
