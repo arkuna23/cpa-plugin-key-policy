@@ -197,3 +197,71 @@ func TestServerNonModelsRequestProxiesWithoutLocalAuth(t *testing.T) {
 		t.Fatalf("status %d body %s", resp.StatusCode, body)
 	}
 }
+
+func TestServerModelsSynthesizesAliasNotInUpstream(t *testing.T) {
+	// Regression: when a key's alias name differs from the target model name
+	// (e.g., alias "test" → target "z-ai/glm-5.2"), the sidecar must still show
+	// the alias in /v1/models. The old FilterModelsResponse filtered by alias
+	// name and found nothing in the upstream list → empty response.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"z-ai/glm-5.2","object":"model","owned_by":"nvidia"},{"id":"glm-5.2","object":"model","owned_by":"opencode"},{"id":"gemma-4-31b","object":"model","owned_by":"cerebras"}]}`))
+	}))
+	defer up.Close()
+
+	hash, err := policy.HashKey("cpa_alias_test_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := policy.NewStore()
+	if err := store.Configure(policy.Config{
+		Enabled:   true,
+		StateFile: filepath.Join(t.TempDir(), "state.json"),
+		Keys: []policy.KeyConfig{{
+			ID: "k1", Enabled: true, KeyHash: hash,
+			// Alias "test" with 2 targets (alias ≠ target_model).
+			Models: []policy.ModelRule{
+				{Alias: "test", Provider: "nvidia", TargetModel: "z-ai/glm-5.2"},
+				{Alias: "test", Provider: "opencode", TargetModel: "glm-5.2"},
+				// Simple alias (alias = target_model).
+				{Alias: "gemma-4-31b", Provider: "cerebras", TargetModel: "gemma-4-31b"},
+			},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := New(Config{Enabled: true, Listen: "127.0.0.1:0", Upstream: up.URL}, store)
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Stop(context.Background()) }()
+
+	req, _ := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer cpa_alias_test_key")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body %s", resp.StatusCode, body)
+	}
+	var list openAIModelsList
+	if err := json.Unmarshal(body, &list); err != nil {
+		t.Fatal(err)
+	}
+	// Should have 2 entries: "test" (synthesized from first target) and
+	// "gemma-4-31b" (direct from upstream). NOT "z-ai/glm-5.2" or "glm-5.2".
+	if len(list.Data) != 2 {
+		t.Fatalf("want 2 models (test + gemma-4-31b), got %d: %v", len(list.Data), list.Data)
+	}
+	ids := map[string]bool{}
+	for _, m := range list.Data {
+		ids[m["id"].(string)] = true
+	}
+	if !ids["test"] || !ids["gemma-4-31b"] {
+		t.Fatalf("want ids {test, gemma-4-31b}, got %v", ids)
+	}
+}

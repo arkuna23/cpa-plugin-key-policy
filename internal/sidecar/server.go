@@ -62,6 +62,7 @@ func (s *Server) Start() error {
 		listen = "127.0.0.1:19090"
 	}
 	proxy := httputil.NewSingleHostReverseProxy(up)
+	proxy.FlushInterval = -1
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		http.Error(w, "sidecar upstream error: "+err.Error(), http.StatusBadGateway)
 	}
@@ -133,11 +134,27 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request, up *url.UR
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	aliases := make([]string, 0, len(key.Models))
+
+	// Build unique alias info from the key's resolved Models. Each alias maps
+	// to one or more target models; we expose one entry per unique alias name
+	// (what the client uses to make requests). A multi-target alias like
+	// "test" (→ z-ai/glm-5.2, glm-5.2) produces a single entry with id="test".
+	aliasSeen := make(map[string]int) // lowercased alias → index in aliasInfos
+	var aliasInfos []AliasModelInfo
 	for _, m := range key.Models {
-		if strings.TrimSpace(m.Alias) != "" {
-			aliases = append(aliases, m.Alias)
+		alias := strings.TrimSpace(m.Alias)
+		if alias == "" {
+			continue
 		}
+		if idx, dup := aliasSeen[strings.ToLower(alias)]; dup {
+			aliasInfos[idx].TargetModels = append(aliasInfos[idx].TargetModels, m.TargetModel)
+			continue
+		}
+		aliasSeen[strings.ToLower(alias)] = len(aliasInfos)
+		aliasInfos = append(aliasInfos, AliasModelInfo{
+			Alias:        alias,
+			TargetModels: []string{m.TargetModel},
+		})
 	}
 
 	upURL := *up
@@ -177,7 +194,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request, up *url.UR
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	filtered, err := FilterModelsResponse(body, aliases)
+	filtered, err := SynthesizeModelsResponse(body, aliasInfos)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
