@@ -371,16 +371,22 @@ func migrateModelsToAliases(cfg *Config) {
 		}
 		for _, m := range key.Models {
 			al := strings.ToLower(m.Alias)
+			target := AliasTarget{Provider: m.Provider, TargetModel: m.TargetModel, Group: m.Group}
 			var ai int
 			if idx, ok := existing[al]; ok {
-				// Reuse the existing global alias without modifying its targets.
+				// Reuse the existing global alias. Merge this ModelRule's
+				// target into it if not already present — a multi-target
+				// alias has multiple ModelRules with the same alias name
+				// but different provider/target, and all targets must be
+				// collected into one global AliasMapping.
 				ai = idx
+				mergeAliasTarget(&cfg.Aliases[idx], target)
 			} else {
-				// Create a new global alias with this single target.
+				// Create a new global alias with this target.
 				ai = len(cfg.Aliases)
 				cfg.Aliases = append(cfg.Aliases, AliasMapping{
 					Alias:       m.Alias,
-					Targets:     []AliasTarget{{Provider: m.Provider, TargetModel: m.TargetModel, Group: m.Group}},
+					Targets:     []AliasTarget{target},
 					Dispatch:    "round-robin",
 					BillingMode: m.BillingMode,
 					InputPricePerMillion:     m.InputPricePerMillion,
@@ -408,6 +414,22 @@ func migrateModelsToAliases(cfg *Config) {
 		// Clear Models — the canonical source is now Aliases.
 		key.Models = nil
 	}
+}
+
+// mergeAliasTarget appends target to a.Targets if an identical target
+// (provider + target_model + group) is not already present. This lets
+// multi-target aliases — submitted as multiple ModelRules sharing one
+// alias name — accumulate all their targets into a single global
+// AliasMapping during migration.
+func mergeAliasTarget(a *AliasMapping, target AliasTarget) {
+	for _, t := range a.Targets {
+		if strings.EqualFold(t.Provider, target.Provider) &&
+			strings.EqualFold(t.TargetModel, target.TargetModel) &&
+			strings.EqualFold(t.Group, target.Group) {
+			return
+		}
+	}
+	a.Targets = append(a.Targets, target)
 }
 
 func normalizeConfig(cfg *Config) error {
