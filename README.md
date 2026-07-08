@@ -106,7 +106,7 @@ Known plugin key:
 
 - allowed alias: request authenticates, routes to configured provider/model, and counts toward RPM.
 - disallowed alias: frontend auth returns unauthenticated, which usually surfaces as an auth failure.
-- `/v1/models`: frontend auth returns unauthenticated to avoid exposing CPA's full model list.
+- `/v1/models` on CPA's main port: per-key `allow_models_endpoint` is binary (401 or full global list). CPA cannot filter the list per downstream key on that port.
 
 Unknown key:
 

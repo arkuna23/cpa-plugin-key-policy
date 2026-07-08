@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=Courier+Prime&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "tertiary": "#5d5b5e",
+                    "ok-soft": "rgba(16,185,129,0.08)",
+                    "ok": "#10b981",
+                    "row-hover": "rgba(139,134,128,0.06)",
+                    "surface": "#ffffff",
+                    "on-tertiary-fixed": "#1c1b1e",
+                    "surface-dim": "#ddd9d8",
+                    "tertiary-container": "#767477",
+                    "primary-fixed-dim": "#ccc5bf",
+                    "accent-soft": "rgba(139,134,128,0.12)",
+                    "on-secondary-fixed": "#1b1c18",
+                    "primary-container": "#78746e",
+                    "danger-soft": "rgba(198,87,70,0.08)",
+                    "accent-ring": "rgba(139,134,128,0.18)",
+                    "surface-variant": "#e6e2e0",
+                    "primary-fixed": "#e8e1da",
+                    "outline": "#7c766e",
+                    "border": "#e3e1db",
+                    "surface-container-highest": "#e6e2e0",
+                    "text-primary": "#2d2a26",
+                    "on-error": "#ffffff",
+                    "surface-bright": "#fdf8f7",
+                    "on-secondary-container": "#656560",
+                    "surface-container-lowest": "#ffffff",
+                    "on-surface-variant": "#4b463f",
+                    "surface-container-high": "#ebe7e6",
+                    "on-background": "#1c1b1b",
+                    "background": "#fdf8f7",
+                    "secondary-fixed": "#e4e2dc",
+                    "scrim": "rgba(45,42,38,0.35)",
+                    "primary": "#5f5b56",
+                    "on-tertiary": "#ffffff",
+                    "danger": "#c65746",
+                    "secondary-fixed-dim": "#c8c6c1",
+                    "accent-3": "#726d67",
+                    "on-primary": "#ffffff",
+                    "on-secondary": "#ffffff",
+                    "on-surface": "#1c1b1b",
+                    "error": "#ba1a1a",
+                    "inverse-primary": "#ccc5bf",
+                    "on-primary-fixed": "#1e1b17",
+                    "warn": "#e0aa14",
+                    "on-primary-fixed-variant": "#4a4641",
+                    "border-strong": "#d5d2cb",
+                    "on-secondary-fixed-variant": "#474743",
+                    "surface-tint": "#625e58",
+                    "inverse-surface": "#31302f",
+                    "inverse-on-surface": "#f4f0ee",
+                    "on-tertiary-fixed-variant": "#474649",
+                    "error-container": "#ffdad6",
+                    "text-muted": "#6d6760",
+                    "on-primary-container": "#fffbff",
+                    "on-error-container": "#93000a",
+                    "surface-container-low": "#f7f3f1",
+                    "outline-variant": "#cdc5bc",
+                    "secondary-container": "#e4e2dc",
+                    "on-tertiary-container": "#fffbff",
+                    "border-hover": "#cecac4",
+                    "tertiary-fixed": "#e5e1e5",
+                    "accent-2": "#7f7a74",
+                    "tertiary-fixed-dim": "#c8c5c9",
+                    "secondary": "#5f5f5a",
+                    "page-bg": "#faf9f5",
+                    "surface-container": "#f1edeb"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "page-max-width": "1200px",
+                    "btn-sm-height": "28px",
+                    "page-padding": "24px",
+                    "nav-height": "64px",
+                    "grid-gap": "16px",
+                    "card-padding": "16px",
+                    "btn-height": "36px"
+            },
+            "fontFamily": {
+                    "card-mono": ["Courier Prime", "monospace"],
+                    "body-md": ["Inter", "sans-serif"],
+                    "mono-md": ["Courier Prime", "monospace"],
+                    "section-label": ["Inter", "sans-serif"],
+                    "mono-sm": ["Courier Prime", "monospace"],
+                    "card-title": ["Inter", "sans-serif"]
+            },
+            "fontSize": {
+                    "card-mono": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "mono-md": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                    "section-label": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                    "mono-sm": ["11px", {"lineHeight": "14px", "fontWeight": "400"}],
+                    "card-title": ["15px", {"lineHeight": "20px", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #faf9f5;
+            color: #2d2a26;
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 36px;
+            height: 20px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #e3e1db;
+            transition: .4s;
+            border-radius: 20px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #8b8680;
+        }
+        input:checked + .slider:before {
+            transform: translateX(16px);
+        }
+        input:focus + .slider {
+            box-shadow: 0 0 1px #8b8680;
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md">
+<!-- TopNavBar Cluster -->
+<header class="bg-surface border-b border-border w-full h-nav-height sticky top-0 z-50">
+<div class="max-w-page-max-width mx-auto px-page-padding h-full flex justify-between items-center">
+<!-- Brand & Nav Links -->
+<div class="flex items-center gap-8">
+<span class="text-card-title font-card-title text-text-primary tracking-tight">CPA Key Management</span>
+<nav class="hidden md:flex items-center gap-6">
+<a class="text-primary font-bold border-b-2 border-primary pb-1 transition-colors duration-200" href="#">密钥列表</a>
+<a class="text-text-muted hover:text-text-primary transition-colors duration-200" href="#">新建密钥</a>
+<a class="text-text-muted hover:text-text-primary transition-colors duration-200" href="#">映射</a>
+</nav>
+</div>
+<!-- Secondary Actions -->
+<div class="flex items-center gap-4">
+<button class="text-text-muted hover:text-text-primary transition-colors duration-200 font-body-md text-body-md">
+                    退出登录
+                </button>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="max-w-page-max-width mx-auto px-page-padding py-12">
+<!-- Page Header Section -->
+<div class="mb-10 flex items-center justify-between">
+<div class="flex items-center gap-4">
+<a class="group flex items-center gap-1 text-text-muted hover:text-text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[18px]">arrow_back</span>
+<span class="font-body-md text-body-md">返回</span>
+</a>
+<h1 class="text-xl font-semibold text-text-primary">编辑规则</h1>
+</div>
+</div>
+<!-- Form Container -->
+<div class="flex justify-center">
+<div class="w-full max-w-[600px] bg-white border border-border rounded-lg p-card-padding shadow-sm">
+<form class="space-y-6" onsubmit="event.preventDefault()">
+<!-- Rule Name -->
+<div class="space-y-2">
+<label class="block font-section-label text-section-label text-text-muted uppercase" for="rule-name">规则名称</label>
+<input class="w-full h-btn-height px-3 border border-border rounded-[6px] focus:border-primary focus:ring-2 focus:ring-accent-ring transition-all outline-none bg-surface-bright" id="rule-name" type="text" value="团队凭证归类"/>
+</div>
+<!-- Match Field -->
+<div class="space-y-2">
+<label class="block font-section-label text-section-label text-text-muted uppercase" for="match-field">匹配字段</label>
+<div class="relative">
+<select class="w-full h-btn-height px-3 pr-10 border border-border rounded-[6px] focus:border-primary focus:ring-2 focus:ring-accent-ring transition-all outline-none bg-surface-bright appearance-none" id="match-field">
+<option value="filename">filename</option>
+<option value="provider">provider</option>
+<option selected="" value="plan_type">plan_type</option>
+<option value="tier">tier</option>
+<option value="custom">自定义...</option>
+</select>
+<div class="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+<span class="material-symbols-outlined text-text-muted">expand_more</span>
+</div>
+</div>
+</div>
+<!-- Custom Field (Hidden/Collapsed) -->
+<div class="space-y-2 hidden" id="custom-field-container">
+<label class="block font-section-label text-section-label text-text-muted uppercase" for="custom-field">自定义字段名称</label>
+<input class="w-full h-btn-height px-3 border border-border rounded-[6px] focus:border-primary focus:ring-2 focus:ring-accent-ring transition-all outline-none bg-surface-bright" id="custom-field" placeholder="输入自定义字段" type="text"/>
+</div>
+<!-- Regex -->
+<div class="space-y-2">
+<label class="block font-section-label text-section-label text-text-muted uppercase" for="regex">正则表达式</label>
+<div class="relative">
+<input class="w-full h-btn-height px-3 pr-10 border border-border rounded-[6px] focus:border-primary focus:ring-2 focus:ring-accent-ring transition-all outline-none bg-surface-bright font-mono-md text-mono-md" id="regex" type="text" value="^team$"/>
+<div class="absolute inset-y-0 right-0 flex items-center px-3">
+<span class="material-symbols-outlined text-ok text-[20px]">check_circle</span>
+</div>
+</div>
+<p class="font-mono-sm text-mono-sm text-ok flex items-center gap-1">
+                            正则编译通过
+                        </p>
+</div>
+<!-- Target Group Name -->
+<div class="space-y-2">
+<label class="block font-section-label text-section-label text-text-muted uppercase" for="target-group">目标组名</label>
+<input class="w-full h-btn-height px-3 border border-border rounded-[6px] focus:border-primary focus:ring-2 focus:ring-accent-ring transition-all outline-none bg-surface-bright" id="target-group" type="text" value="team"/>
+</div>
+<!-- Enable Toggle -->
+<div class="flex items-center justify-between py-2 border-t border-border pt-6">
+<span class="font-section-label text-section-label text-text-muted uppercase">启用状态</span>
+<div class="flex items-center gap-3">
+<span class="text-body-md text-text-primary">启用</span>
+<label class="switch">
+<input checked="" type="checkbox"/>
+<span class="slider"></span>
+</label>
+</div>
+</div>
+<!-- Footer Actions -->
+<div class="flex items-center gap-3 pt-4">
+<button class="h-btn-height px-6 bg-primary text-white rounded-md hover:bg-on-surface-variant transition-colors font-semibold text-body-md" type="submit">
+                            保存
+                        </button>
+<button class="h-btn-height px-6 border border-border text-text-primary rounded-md hover:bg-row-hover transition-colors text-body-md" type="button">
+                            取消
+                        </button>
+</div>
+</form>
+</div>
+</div>
+</main>
+<script>
+        // Simple logic for Custom Field visibility
+        const matchField = document.getElementById('match-field');
+        const customFieldContainer = document.getElementById('custom-field-container');
+
+        matchField.addEventListener('change', function() {
+            if (this.value === 'custom') {
+                customFieldContainer.classList.remove('hidden');
+            } else {
+                customFieldContainer.classList.add('hidden');
+            }
+        });
+
+        // Toggle focus states visually
+        const inputs = document.querySelectorAll('input, select');
+        inputs.forEach(input => {
+            input.addEventListener('focus', () => {
+                input.parentElement.classList.add('border-primary');
+            });
+            input.addEventListener('blur', () => {
+                input.parentElement.classList.remove('border-primary');
+            });
+        });
+    </script>
+</body></html>

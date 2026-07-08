@@ -3,7 +3,8 @@
     "title": "Управление cpa-key-policy",
     "keyList": "Ключи",
     "newKey": "Новый ключ",
-    "logout": "Выйти"
+    "logout": "Выйти",
+    "mapping": "Маппинг"
   },
   "login": {
     "subTitle": "Вход в CLIProxyAPI",
@@ -116,7 +117,8 @@
       "sectionLimits": "Лимиты",
       "sectionAccess": "Доступ",
       "sectionModels": "Модели и цены"
-    }
+    },
+    "existingAliases": "Существующие псевдонимы"
   },
   "picker": {
     "title": "Выбор моделей",
@@ -195,6 +197,72 @@
       "viewUsage": "Подробности использования",
       "tokenMix": "Состав токенов",
       "last7Days": "Последние 7 дней"
+    }
+  },
+  "mapping": {
+    "title": "Маппинг",
+    "aliasTab": "Псевдонимы",
+    "classifyTab": "Классификация",
+    "newAlias": "Новый псевдоним",
+    "newRule": "Новое правило",
+    "edit": "Изменить",
+    "delete": "Удалить",
+    "save": "Сохранить",
+    "cancel": "Отмена",
+    "back": "Назад",
+    "refs": "Используется {n} ключами",
+    "unreferenced": "Не используется",
+    "moreTargets": "+{n} ещё целей",
+    "deleteBlocked": "Используется {n} ключами, сначала удалите ссылки",
+    "alias": {
+      "name": "Имя псевдонима",
+      "dispatch": "Режим",
+      "roundRobin": "Round-robin",
+      "priority": "Приоритет",
+      "roundRobinDesc": "Циклическое распределение запросов между целями",
+      "priorityDesc": "Использовать цели по порядку, первая доступная",
+      "targets": "Список целей",
+      "addTarget": "Добавить цель",
+      "billing": "Режим оплаты",
+      "tokens": "По токенам",
+      "perCall": "За вызов",
+      "input": "Вход",
+      "output": "Выход",
+      "cache": "Кэш",
+      "perCallUnit": "за вызов",
+      "perMillion": "за 1M",
+      "editTitle": "Изменить псевдоним",
+      "newTitle": "Новый псевдоним"
+    },
+    "rule": {
+      "name": "Имя правила",
+      "field": "Поле",
+      "fieldFilename": "filename",
+      "fieldProvider": "provider",
+      "fieldPlanType": "plan_type",
+      "fieldTier": "tier",
+      "fieldCustom": "Своё...",
+      "customField": "Свое имя поля",
+      "regex": "Регулярное выражение",
+      "regexValid": "Регулярное выражение корректно",
+      "regexInvalid": "Ошибка компиляции: {err}",
+      "group": "Целевая группа",
+      "enabled": "Включено",
+      "builtin": "Встроенные правила",
+      "builtinReadOnly": "только чтение",
+      "builtinDesc": "Встроенные правила запускаются после пользовательских, обнаруживая plan_type и tier",
+      "custom": "Пользовательские правила",
+      "matchCount": "Совпадает {{n}}",
+      "matchCountZero": "Совпадений 0",
+      "prevPage": "Назад",
+      "nextPage": "Вперёд",
+      "pageInfo": "{cur} / {total}",
+      "editTitle": "Изменить правило",
+      "newTitle": "Новое правило",
+      "moveUp": "Вверх",
+      "moveDown": "Вниз",
+      "files": "Найденные файлы",
+      "noFiles": "Нет совпадений"
     }
   }
 }

@@ -20,4 +20,3 @@ plugins:
             - alias: "sonnet"
               provider: "claude"
               target_model: "claude-sonnet-4-5-20250929"
-

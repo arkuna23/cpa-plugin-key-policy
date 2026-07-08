@@ -6,6 +6,8 @@
 /dist/
 .gomodcache/
 .gocache/
+.go-appdata/
+.go-localappdata/
 cpa-key-policy-state.json
 coverage.out
 

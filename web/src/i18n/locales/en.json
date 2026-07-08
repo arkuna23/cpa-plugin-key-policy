@@ -3,7 +3,8 @@
     "title": "cpa-key-policy Management",
     "keyList": "Keys",
     "newKey": "New Key",
-    "logout": "Log out"
+    "logout": "Log out",
+    "mapping": "Mapping"
   },
   "login": {
     "subTitle": "Sign in to CLIProxyAPI",
@@ -116,7 +117,8 @@
       "sectionLimits": "Limits",
       "sectionAccess": "Access",
       "sectionModels": "Models & pricing"
-    }
+    },
+    "existingAliases": "Existing Aliases (quick reference)"
   },
   "picker": {
     "title": "Select models",
@@ -195,6 +197,72 @@
       "viewUsage": "View usage details",
       "tokenMix": "Token mix",
       "last7Days": "Last 7 days"
+    }
+  },
+  "mapping": {
+    "title": "Mapping",
+    "aliasTab": "Alias Mapping",
+    "classifyTab": "Credential Classification",
+    "newAlias": "New Alias",
+    "newRule": "New Rule",
+    "edit": "Edit",
+    "delete": "Delete",
+    "save": "Save",
+    "cancel": "Cancel",
+    "back": "Back",
+    "refs": "Referenced by {n} key(s)",
+    "unreferenced": "Not referenced",
+    "moreTargets": "+{n} more targets",
+    "deleteBlocked": "Referenced by {n} key(s), remove references first",
+    "alias": {
+      "name": "Alias Name",
+      "dispatch": "Dispatch Mode",
+      "roundRobin": "Round-robin",
+      "priority": "Priority",
+      "roundRobinDesc": "Cycle requests across available targets (load balancing)",
+      "priorityDesc": "Use targets in order, first available wins",
+      "targets": "Target List",
+      "addTarget": "Add Target",
+      "billing": "Billing Mode",
+      "tokens": "Per Token",
+      "perCall": "Per Call",
+      "input": "Input",
+      "output": "Output",
+      "cache": "Cache",
+      "perCallUnit": "per call",
+      "perMillion": "per 1M",
+      "editTitle": "Edit Alias",
+      "newTitle": "New Alias"
+    },
+    "rule": {
+      "name": "Rule Name",
+      "field": "Match Field",
+      "fieldFilename": "filename",
+      "fieldProvider": "provider",
+      "fieldPlanType": "plan_type",
+      "fieldTier": "tier",
+      "fieldCustom": "Custom...",
+      "customField": "Custom field name",
+      "regex": "Regex Pattern",
+      "regexValid": "Regex compiled successfully",
+      "regexInvalid": "Regex compilation failed: {err}",
+      "group": "Target Group",
+      "enabled": "Enabled",
+      "builtin": "Built-in Rules",
+      "builtinReadOnly": "Read-only",
+      "builtinDesc": "Built-in rules always run after custom rules, detecting plan_type and tier fields",
+      "custom": "Custom Rules",
+      "matchCount": "Matches {{n}} credential(s)",
+      "matchCountZero": "Matches 0 credentials",
+      "prevPage": "Previous",
+      "nextPage": "Next",
+      "pageInfo": "{cur} / {total}",
+      "editTitle": "Edit Rule",
+      "newTitle": "New Rule",
+      "moveUp": "Move Up",
+      "moveDown": "Move Down",
+      "files": "Matched credential files",
+      "noFiles": "No matching credentials"
     }
   }
 }

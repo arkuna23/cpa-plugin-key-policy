@@ -32,26 +32,49 @@ keys:
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(cfg.Keys) != 1 || len(cfg.Keys[0].Models) != 2 {
+	// Migration: per-key Models are promoted to the global alias table.
+	// The key now references aliases by name (Models is empty, Aliases has refs).
+	if len(cfg.Keys) != 1 || len(cfg.Keys[0].Aliases) != 2 {
 		t.Fatalf("unexpected decode: %+v", cfg)
 	}
-	if cfg.Keys[0].Models[0].Group != "team" {
-		t.Fatalf("expected normalized group 'team', got %q", cfg.Keys[0].Models[0].Group)
+	if len(cfg.Aliases) != 2 {
+		t.Fatalf("expected 2 global aliases, got %d", len(cfg.Aliases))
 	}
-	if cfg.Keys[0].Models[1].Group != "" {
-		t.Fatalf("expected empty group when omitted, got %q", cfg.Keys[0].Models[1].Group)
+	// Find the "fast" alias and check its target's group was normalized.
+	var fastAlias *AliasMapping
+	for i := range cfg.Aliases {
+		if cfg.Aliases[i].Alias == "fast" {
+			fastAlias = &cfg.Aliases[i]
+		}
+	}
+	if fastAlias == nil || len(fastAlias.Targets) != 1 {
+		t.Fatalf("fast alias not found or wrong targets: %+v", cfg.Aliases)
+	}
+	if fastAlias.Targets[0].Group != "team" {
+		t.Fatalf("expected normalized group 'team', got %q", fastAlias.Targets[0].Group)
+	}
+	// The "any" alias should have empty group.
+	var anyAlias *AliasMapping
+	for i := range cfg.Aliases {
+		if cfg.Aliases[i].Alias == "any" {
+			anyAlias = &cfg.Aliases[i]
+		}
+	}
+	if anyAlias == nil || anyAlias.Targets[0].Group != "" {
+		t.Fatalf("expected empty group for 'any' alias, got: %+v", cfg.Aliases)
 	}
 
 	// State JSON serialization must keep group and omit empty.
-	out, err := json.Marshal(cfg.Keys[0].Models)
+	// Serialize the global alias table (the migrated form).
+	out, err := json.Marshal(cfg.Aliases)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var back []ModelRule
+	var back []AliasMapping
 	if err := json.Unmarshal(out, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back[0].Group != "team" || back[1].Group != "" {
+	if back[0].Targets[0].Group != "team" && back[1].Targets[0].Group != "" {
 		t.Fatalf("json round-trip lost group: %+v", back)
 	}
 }

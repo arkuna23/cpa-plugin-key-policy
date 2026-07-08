@@ -695,3 +695,108 @@ func mustHandle(t *testing.T, app *App, method string, req []byte) []byte {
 	}
 	return raw
 }
+
+// TestAppMultiTargetAliasRoute verifies that a key with a multi-target alias
+// (same alias name, different targets) routes correctly via model.route.
+// This reproduces the 502 bug: CPA calls model.route and the plugin must
+// return Handled=true with a valid Target/TargetModel for each round-robin
+// rotation.
+func TestAppMultiTargetAliasRoute(t *testing.T) {
+	app := NewApp()
+	plain := "cpa_multi_target_test"
+	hash := hashForTest(t, plain)
+	stateFile := filepath.ToSlash(filepath.Join(t.TempDir(), "state.json"))
+	yaml := []byte(`
+enabled: true
+state_file: "` + stateFile + `"
+aliases:
+  - alias: mymulti
+    targets:
+      - {provider: opencode, target_model: glm-5.2}
+      - {provider: nvidia, target_model: z-ai/glm-5.2}
+    dispatch: round-robin
+    billing_mode: tokens
+keys:
+  - id: mt-key
+    enabled: true
+    key_hash: "` + hash + `"
+    aliases:
+      - alias: mymulti
+`)
+	req, _ := json.Marshal(LifecycleRequest{ConfigYAML: yaml})
+	if _, err := app.HandleMethod(MethodPluginReconfigure, req); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+
+	hdr := http.Header{}
+	hdr.Set("Authorization", "Bearer "+plain)
+
+	// Route should return Handled=true and alternate between the two targets.
+	targetsSeen := map[string]bool{}
+	for i := 0; i < 4; i++ {
+		routeReq, _ := json.Marshal(ModelRouteRequest{
+			RequestedModel: "mymulti",
+			Headers:        hdr,
+		})
+		raw, err := app.HandleMethod(MethodModelRoute, routeReq)
+		if err != nil {
+			t.Fatalf("route call %d: %v", i, err)
+		}
+		resp := routeResponseFromEnvelope(t, raw)
+		if !resp.Handled {
+			t.Fatalf("call %d: expected Handled=true, got false", i)
+		}
+		if resp.Target == "" || resp.TargetModel == "" {
+			t.Fatalf("call %d: empty Target/TargetModel: %+v", i, resp)
+		}
+		key := resp.Target + "/" + resp.TargetModel
+		targetsSeen[key] = true
+		t.Logf("call %d: %s", i, key)
+	}
+	// After 4 calls with 2 targets, both should have been seen (round-robin).
+	if len(targetsSeen) != 2 {
+		t.Fatalf("expected 2 distinct targets via round-robin, got %d: %v", len(targetsSeen), targetsSeen)
+	}
+}
+
+func routeResponseFromEnvelope(t *testing.T, raw []byte) ModelRouteResponse {
+	t.Helper()
+	var env Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatal(err)
+	}
+	var resp ModelRouteResponse
+	if err := json.Unmarshal(env.Result, &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+// TestResolveProviderKey verifies the openai-compatible- prefix mapping so
+// CPA's HasBuiltinProvider check succeeds for OpenAI-compatibility providers.
+// Reproduces the 502 bug: CPA log "model router returned unavailable
+// provider" when the plugin returned the bare provider name "nvidia".
+func TestResolveProviderKey(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		avail    []string
+		want     string
+	}{
+		{"bare matches built-in", "codex", []string{"codex", "claude"}, "codex"},
+		{"nvidia openai-compat", "nvidia", []string{"openai-compatible-nvidia", "openai-compatible-opencode", "cerebras"}, "openai-compatible-nvidia"},
+		{"opencode openai-compat", "opencode", []string{"openai-compatible-nvidia", "openai-compatible-opencode"}, "openai-compatible-opencode"},
+		{"cerebras openai-compat", "cerebras", []string{"openai-compatible-cerebras"}, "openai-compatible-cerebras"},
+		{"no available → bare fallback", "nvidia", nil, "nvidia"},
+		{"not in available → bare", "custom", []string{"openai-compatible-x"}, "custom"},
+		{"empty", "", []string{"codex"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveProviderKey(tc.provider, tc.avail)
+			if got != tc.want {
+				t.Fatalf("resolveProviderKey(%q, %v) = %q, want %q", tc.provider, tc.avail, got, tc.want)
+			}
+		})
+	}
+}

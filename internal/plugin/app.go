@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"cpa-key-policy/internal/plugin/web"
 	"cpa-key-policy/internal/policy"
@@ -63,9 +64,22 @@ func (a *App) configure(raw []byte) error {
 	if err := a.store.Configure(cfg); err != nil {
 		return err
 	}
-	// (Re)start the periodic usage-ledger flusher for the configured state path.
+	// Register the classify cache clear callback, then clear once for safety.
+	a.store.SetOnClassifyRulesChanged(func() {
+		classifyCache.mu.Lock()
+		classifyCache.data = make(map[string][]string)
+		classifyCache.mu.Unlock()
+	})
+	classifyCache.mu.Lock()
+	classifyCache.data = make(map[string][]string)
+	classifyCache.mu.Unlock()
 	a.store.StartUsageFlusher()
 	return nil
+}
+
+// Shutdown flushes usage. Host calls this on plugin unload.
+func (a *App) Shutdown() {
+	a.store.FlushUsage()
 }
 
 func (a *App) registration() Registration {
@@ -138,10 +152,44 @@ func (a *App) routeModel(raw []byte) ([]byte, error) {
 	return OKEnvelope(ModelRouteResponse{
 		Handled:     true,
 		TargetKind:  "provider",
-		Target:      rule.Provider,
+		Target:      resolveProviderKey(rule.Provider, req.AvailableProviders),
 		TargetModel: rule.TargetModel,
 		Reason:      "cpa-key-policy:" + keyID,
 	})
+}
+
+// resolveProviderKey maps a ModelRule's provider to the provider key CPA's
+// auth manager uses, so HasBuiltinProvider(target) succeeds.
+//
+// OpenAI-compatibility providers are registered with auth.Provider
+// prefixed as "openai-compatible-<name>" (see synthesizer.config:
+// auth.Provider = OpenAICompatibleProviderKey(name)). The plugin's
+// ModelRule.Provider field carries the bare name (e.g. "nvidia",
+// "opencode"). Returning the bare name makes CPA skip the router
+// ("model router returned unavailable provider") and fall back to the
+// native path, which fails for non-native alias names like "test1".
+//
+// We pick the key present in AvailableProviders, trying the bare name
+// first (for built-in providers like codex/claude/gemini) then the
+// openai-compatible- prefixed form. If neither matches we return the
+// bare name and let CPA's availability check skip us (the native path
+// still resolves true model names).
+func resolveProviderKey(provider string, availableProviders []string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	if p == "" {
+		return p
+	}
+	if len(availableProviders) == 0 {
+		return p
+	}
+	for _, candidate := range []string{p, "openai-compatible-" + p} {
+		for _, avail := range availableProviders {
+			if strings.EqualFold(candidate, avail) {
+				return candidate
+			}
+		}
+	}
+	return p
 }
 
 func (a *App) interceptResponse(raw []byte) ([]byte, error) {
@@ -210,7 +258,7 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 
 	matched := make([]SchedulerAuthCandidate, 0, len(req.Candidates))
 	for _, cand := range req.Candidates {
-		if schedulerCandidateMatchesGroup(cand, group) {
+		if a.candidateMatchesGroup(cand, group) {
 			matched = append(matched, cand)
 		}
 	}
@@ -234,6 +282,106 @@ func (a *App) pickScheduler(raw []byte) ([]byte, error) {
 		}
 	}
 	return OKEnvelope(SchedulerPickResponse{Handled: true, AuthID: best.ID})
+}
+
+// classifyCache memoizes candidate ID → set of groups. Cleared on reconfigure.
+// This avoids re-running regex on every request for large auth-file sets.
+var classifyCache = struct {
+	mu   sync.RWMutex
+	data map[string][]string // candidate ID → groups
+}{}
+
+// candidateMatchesGroup reports whether a candidate auth belongs to the
+// requested group. It first evaluates user-defined ClassifyRules (which can
+// override built-in detection — a candidate may belong to multiple groups).
+// If no custom rule matches, it falls back to the built-in plan_type/tier
+// detection. Uses an ID-level cache for performance with large auth-file sets.
+func (a *App) candidateMatchesGroup(cand SchedulerAuthCandidate, group string) bool {
+	groups := a.candidateGroups(cand)
+	for _, g := range groups {
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
+
+// candidateGroups returns all groups a candidate belongs to. Custom rules are
+// evaluated first (multi-group: a candidate can match multiple rules). If no
+// custom rule matches, the built-in plan_type/tier detection runs. Results are
+// cached by candidate ID; the cache is cleared on reconfigure.
+func (a *App) candidateGroups(cand SchedulerAuthCandidate) []string {
+	id := cand.ID
+	// Check cache.
+	classifyCache.mu.RLock()
+	if cached, ok := classifyCache.data[id]; ok {
+		classifyCache.mu.RUnlock()
+		return cached
+	}
+	classifyCache.mu.RUnlock()
+
+	var groups []string
+	// 1. Evaluate custom classify rules (multi-group: collect all matches).
+	for _, rule := range a.store.ClassifyRulesSnapshot() {
+		if !rule.Enabled || rule.Compiled() == nil {
+			continue
+		}
+		val := candidateFieldValue(cand, rule.Field)
+		if val != "" && rule.Compiled().MatchString(val) {
+			groups = append(groups, strings.ToLower(rule.Group))
+		}
+	}
+	// 2. If no custom rule matched, fall back to built-in plan_type/tier.
+	if len(groups) == 0 {
+		if g := builtInGroup(cand); g != "" {
+			groups = append(groups, g)
+		}
+	}
+
+	// Cache the result.
+	classifyCache.mu.Lock()
+	if classifyCache.data == nil {
+		classifyCache.data = make(map[string][]string)
+	}
+	classifyCache.data[id] = groups
+	classifyCache.mu.Unlock()
+	return groups
+}
+
+// candidateFieldValue extracts the value of a named field from the candidate.
+// Supported fields: "filename" (cand.ID), "provider" (cand.Provider),
+// "plan_type" (cand.Attributes["plan_type"]), "tier" (cand.Attributes["tier"]),
+// or any custom attribute key.
+func candidateFieldValue(cand SchedulerAuthCandidate, field string) string {
+	field = strings.ToLower(strings.TrimSpace(field))
+	switch field {
+	case "filename", "id":
+		return cand.ID
+	case "provider":
+		return cand.Provider
+	default:
+		if cand.Attributes != nil {
+			return cand.Attributes[field]
+		}
+	}
+	return ""
+}
+
+// builtInGroup returns the built-in plan_type/tier group for a candidate,
+// or "supported" if no recognizable claim is present (untiered bucket).
+func builtInGroup(cand SchedulerAuthCandidate) string {
+	if cand.Attributes == nil {
+		return "supported"
+	}
+	plan := strings.ToLower(strings.TrimSpace(cand.Attributes["plan_type"]))
+	tier := strings.ToLower(strings.TrimSpace(cand.Attributes["tier"]))
+	if plan != "" {
+		return plan
+	}
+	if tier != "" {
+		return tier
+	}
+	return "supported"
 }
 
 // schedulerGroupFromMetadata reads the group stamped at authenticate time out
@@ -313,6 +461,14 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/keys/reset-rpm", Description: "Reset one downstream CPA key RPM counter by id."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Per-alias usage breakdown for one downstream CPA key by id."},
 			{Method: http.MethodGet, Path: base + "/status", Description: "Show cpa-key-policy runtime status."},
+			{Method: http.MethodGet, Path: base + "/aliases", Description: "List the global alias mapping table."},
+			{Method: http.MethodPost, Path: base + "/aliases", Description: "Create or update a global alias mapping."},
+			{Method: http.MethodDelete, Path: base + "/aliases", Description: "Delete a global alias mapping by name."},
+			{Method: http.MethodGet, Path: base + "/classify-rules", Description: "List credential classification rules."},
+			{Method: http.MethodPost, Path: base + "/classify-rules", Description: "Create or update a classification rule."},
+			{Method: http.MethodDelete, Path: base + "/classify-rules", Description: "Delete a classification rule by name."},
+			{Method: http.MethodPost, Path: base + "/classify-rules/reorder", Description: "Reorder classification rules."},
+			{Method: http.MethodPost, Path: base + "/classify-preview", Description: "Preview credential classification results for given descriptors."},
 		},
 		Resources: []ResourceRoute{
 			{Path: web.IndexPath, Menu: "Key Policy", Description: "Web UI for managing downstream CPA key policies (create keys, pick models)."},
@@ -353,21 +509,38 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.keyUsage(idFromRequest(req.Query, req.Body)))
 	case req.Method == http.MethodGet && path == base+"/status":
 		return OKEnvelope(jsonResponse(http.StatusOK, a.store.Status()))
+	case req.Method == http.MethodGet && path == base+"/aliases":
+		return OKEnvelope(jsonResponse(http.StatusOK, map[string]any{"aliases": a.store.AliasesSnapshot()}))
+	case req.Method == http.MethodPost && path == base+"/aliases":
+		return OKEnvelope(a.upsertAlias(req.Body))
+	case req.Method == http.MethodDelete && path == base+"/aliases":
+		return OKEnvelope(a.deleteAlias(req.Body))
+	case req.Method == http.MethodGet && path == base+"/classify-rules":
+		return OKEnvelope(jsonResponse(http.StatusOK, map[string]any{"rules": a.store.ClassifyRulesSnapshot()}))
+	case req.Method == http.MethodPost && path == base+"/classify-rules":
+		return OKEnvelope(a.upsertClassifyRule(req.Body))
+	case req.Method == http.MethodDelete && path == base+"/classify-rules":
+		return OKEnvelope(a.deleteClassifyRule(req.Body))
+	case req.Method == http.MethodPost && path == base+"/classify-rules/reorder":
+		return OKEnvelope(a.reorderClassifyRules(req.Body))
+	case req.Method == http.MethodPost && path == base+"/classify-preview":
+		return OKEnvelope(a.classifyPreview(req.Body))
 	default:
 		return OKEnvelope(jsonError(http.StatusNotFound, "not_found", "unknown management route"))
 	}
 }
 
 type keyWriteRequest struct {
-	ID                  string             `json:"id"`
-	Name                *string            `json:"name,omitempty"`
-	Enabled             *bool              `json:"enabled,omitempty"`
-	Key                 string             `json:"key,omitempty"`
-	RPM                 *int               `json:"rpm,omitempty"`
-	Models              []policy.ModelRule `json:"models,omitempty"`
-	DailyLimitUSD       *float64           `json:"daily_limit_usd,omitempty"`
-	WeeklyLimitUSD      *float64           `json:"weekly_limit_usd,omitempty"`
-	AllowModelsEndpoint *bool              `json:"allow_models_endpoint,omitempty"`
+	ID                  string              `json:"id"`
+	Name                *string             `json:"name,omitempty"`
+	Enabled             *bool               `json:"enabled,omitempty"`
+	Key                 string              `json:"key,omitempty"`
+	RPM                 *int                `json:"rpm,omitempty"`
+	Models              []policy.ModelRule   `json:"models,omitempty"`
+	Aliases             []policy.KeyAliasRef `json:"aliases,omitempty"`
+	DailyLimitUSD       *float64            `json:"daily_limit_usd,omitempty"`
+	WeeklyLimitUSD      *float64            `json:"weekly_limit_usd,omitempty"`
+	AllowModelsEndpoint *bool               `json:"allow_models_endpoint,omitempty"`
 }
 
 type publicKey struct {
@@ -377,6 +550,7 @@ type publicKey struct {
 	KeyPreview          string              `json:"key_preview"`
 	RPM                 int                 `json:"rpm"`
 	Models              []policy.ModelRule  `json:"models"`
+	Aliases             []policy.KeyAliasRef `json:"aliases"`
 	DailyLimitUSD       float64             `json:"daily_limit_usd"`
 	WeeklyLimitUSD      float64             `json:"weekly_limit_usd"`
 	AllowModelsEndpoint bool                `json:"allow_models_endpoint,omitempty"`
@@ -428,6 +602,7 @@ func (a *App) createKey(body []byte) ManagementResponse {
 		KeyPreview:          policy.PreviewKey(plain),
 		RPM:                 rpm,
 		Models:              req.Models,
+		Aliases:             req.Aliases,
 		DailyLimitUSD:       applyFloat64(req.DailyLimitUSD, 0),
 		WeeklyLimitUSD:      applyFloat64(req.WeeklyLimitUSD, 0),
 		AllowModelsEndpoint: applyBool(req.AllowModelsEndpoint, false),
@@ -484,6 +659,9 @@ func (a *App) patchKey(body []byte) ManagementResponse {
 	}
 	if req.Models != nil {
 		current.Models = req.Models
+	}
+	if req.Aliases != nil {
+		current.Aliases = req.Aliases
 	}
 	if strings.TrimSpace(req.Key) != "" {
 		hash, err := policy.HashKey(req.Key)
@@ -589,9 +767,12 @@ func (a *App) publicKeyFromConfig(key policy.KeyConfig) publicKey {
 		Enabled:    key.Enabled,
 		KeyPreview: key.KeyPreview,
 		RPM:        key.RPM,
-		// Ensure models always serializes as [] (never null). A nil slice would
-		// marshal to JSON null, which the UI accesses as .length and crashes on.
+		// Ensure models/aliases always serialize as [] (never null). A nil slice
+		// would marshal to JSON null, which the UI accesses as .length and
+		// crashes on. Models is derived (resolved from Aliases × global table);
+		// Aliases is the canonical source.
 		Models:              append([]policy.ModelRule{}, key.Models...),
+		Aliases:             append([]policy.KeyAliasRef{}, key.Aliases...),
 		DailyLimitUSD:       key.DailyLimitUSD,
 		WeeklyLimitUSD:      key.WeeklyLimitUSD,
 		AllowModelsEndpoint: key.AllowModelsEndpoint,

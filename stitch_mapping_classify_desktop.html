@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Courier+Prime&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet"/>
+<title>映射管理 - CPA Key Management</title>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error": "#ffffff",
+                        "border-hover": "#cecac4",
+                        "on-background": "#1c1b1b",
+                        "border": "#e3e1db",
+                        "text-muted": "#6d6760",
+                        "on-secondary-fixed-variant": "#474743",
+                        "inverse-surface": "#31302f",
+                        "primary-fixed": "#e8e1da",
+                        "accent-ring": "rgba(139,134,128,0.18)",
+                        "page-bg": "#faf9f5",
+                        "on-tertiary-container": "#fffbff",
+                        "inverse-on-surface": "#f4f0ee",
+                        "primary-container": "#78746e",
+                        "tertiary-container": "#767477",
+                        "on-primary": "#ffffff",
+                        "inverse-primary": "#ccc5bf",
+                        "ok": "#10b981",
+                        "tertiary-fixed-dim": "#c8c5c9",
+                        "surface-bright": "#fdf8f7",
+                        "surface-container-low": "#f7f3f1",
+                        "accent-soft": "rgba(139,134,128,0.12)",
+                        "surface": "#ffffff",
+                        "on-surface": "#1c1b1b",
+                        "surface-variant": "#e6e2e0",
+                        "primary": "#5f5b56",
+                        "on-error-container": "#93000a",
+                        "warn": "#e0aa14",
+                        "on-tertiary-fixed-variant": "#474649",
+                        "background": "#fdf8f7",
+                        "surface-container-high": "#ebe7e6",
+                        "error-container": "#ffdad6",
+                        "ok-soft": "rgba(16,185,129,0.08)",
+                        "error": "#ba1a1a",
+                        "danger-soft": "rgba(198,87,70,0.08)",
+                        "surface-tint": "#625e58",
+                        "on-secondary-fixed": "#1b1c18",
+                        "accent-3": "#726d67",
+                        "on-secondary-container": "#656560",
+                        "secondary": "#5f5f5a",
+                        "on-primary-fixed-variant": "#4a4641",
+                        "secondary-fixed": "#e4e2dc",
+                        "secondary-container": "#e4e2dc",
+                        "scrim": "rgba(45,42,38,0.35)",
+                        "tertiary": "#5d5b5e",
+                        "outline": "#7c766e",
+                        "on-surface-variant": "#4b463f",
+                        "tertiary-fixed": "#e5e1e5",
+                        "primary-fixed-dim": "#ccc5bf",
+                        "on-primary-container": "#fffbff",
+                        "surface-dim": "#ddd9d8",
+                        "surface-container": "#f1edeb",
+                        "accent-2": "#7f7a74",
+                        "secondary-fixed-dim": "#c8c6c1",
+                        "text-primary": "#2d2a26",
+                        "surface-container-highest": "#e6e2e0",
+                        "danger": "#c65746",
+                        "border-strong": "#d5d2cb",
+                        "on-tertiary-fixed": "#1c1b1e",
+                        "on-primary-fixed": "#1e1b17",
+                        "on-tertiary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "row-hover": "rgba(139,134,128,0.06)",
+                        "outline-variant": "#cdc5bc"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "page-max-width": "1200px",
+                        "card-padding": "16px",
+                        "page-padding": "24px",
+                        "btn-sm-height": "28px",
+                        "btn-height": "36px",
+                        "grid-gap": "16px",
+                        "nav-height": "64px"
+                    },
+                    "fontFamily": {
+                        "section-label": ["Inter"],
+                        "body-md": ["Inter"],
+                        "mono-sm": ["Courier Prime"],
+                        "mono-md": ["Courier Prime"],
+                        "card-mono": ["Courier Prime"],
+                        "card-title": ["Inter"]
+                    },
+                    "fontSize": {
+                        "section-label": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "mono-sm": ["11px", {"lineHeight": "14px", "fontWeight": "400"}],
+                        "mono-md": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "card-mono": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                        "card-title": ["15px", {"lineHeight": "20px", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { background-color: #faf9f5; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            vertical-align: middle;
+            line-height: 1;
+        }
+        .active-tab { border-bottom: 2px solid #8b8680; color: #2d2a26; }
+        .rule-card:hover { border-color: #cecac4; background-color: rgba(139,134,128,0.02); }
+        .switch-input:checked + .switch-slider { background-color: #8b8680; }
+        .switch-input:checked + .switch-slider:before { transform: translateX(14px); }
+    </style>
+</head>
+<body class="font-body-md text-body-md text-on-surface antialiased">
+<!-- TopNavBar -->
+<nav class="bg-surface border-b border-border fixed top-0 left-0 right-0 z-50">
+<div class="flex justify-between items-center px-page-padding h-nav-height w-full max-w-page-max-width mx-auto">
+<div class="flex items-center gap-8">
+<span class="font-card-title text-card-title text-text-primary tracking-tight">CPA Key Management</span>
+<div class="hidden md:flex items-center gap-6">
+<a class="text-text-muted hover:text-text-primary transition-colors duration-200" href="#">密钥列表</a>
+<a class="text-text-muted hover:text-text-primary transition-colors duration-200" href="#">新建密钥</a>
+<a class="text-primary font-bold border-b-2 border-primary pb-1 transition-colors duration-200" href="#">映射</a>
+</div>
+</div>
+<button class="text-text-muted font-body-md hover:text-text-primary transition-colors duration-200 flex items-center gap-1">
+<span class="material-symbols-outlined text-[18px]">logout</span>
+<span>退出登录</span>
+</button>
+</div>
+</nav>
+<!-- Main Content -->
+<main class="pt-24 pb-12 px-page-padding max-w-[800px] mx-auto min-h-screen">
+<!-- Header & Tabs -->
+<div class="flex flex-col gap-6 mb-8">
+<h1 class="font-card-title text-card-title text-text-primary">映射管理</h1>
+<div class="flex items-center justify-between border-b border-border overflow-x-auto md:overflow-visible">
+<div class="flex gap-8">
+<button class="pb-3 text-text-muted font-body-md hover:text-text-primary whitespace-nowrap">别名映射</button>
+<button class="pb-3 active-tab font-body-md font-semibold whitespace-nowrap">凭证归类</button>
+</div>
+<button class="mb-2 bg-[#8b8680] text-on-primary px-4 h-btn-height rounded-lg flex items-center gap-2 hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined text-[20px]">add</span>
+<span class="font-body-md">新建规则</span>
+</button>
+</div>
+</div>
+<!-- Section 1: Built-in Rules -->
+<section class="mb-10">
+<div class="bg-surface border border-border rounded-[10px] p-card-padding">
+<div class="flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-text-muted text-[20px]">info</span>
+<h2 class="font-card-title text-[14px] text-text-primary">内置规则（只读）</h2>
+</div>
+<div class="space-y-3">
+<div class="flex items-center justify-between py-2 border-b border-surface-container border-dashed">
+<div class="flex items-center gap-4">
+<span class="font-mono-md text-mono-md text-primary">plan_type → 组名</span>
+</div>
+<span class="font-mono-sm text-mono-sm text-text-muted">field=plan_type, pattern=*, group=<detected></span>
+</div>
+<div class="flex items-center justify-between py-2">
+<div class="flex items-center gap-4">
+<span class="font-mono-md text-mono-md text-primary">tier → 组名</span>
+</div>
+<span class="font-mono-sm text-mono-sm text-text-muted">field=tier, pattern=*, group=<detected></span>
+</div>
+</div>
+</div>
+</section>
+<!-- Section 2: Custom Rules -->
+<section>
+<div class="mb-4">
+<span class="font-section-label text-section-label text-text-muted uppercase tracking-widest">自定义规则</span>
+</div>
+<div class="flex flex-col gap-3">
+<!-- Rule Card 1 (Expanded) -->
+<div class="bg-surface border border-border rounded-[10px] overflow-hidden rule-card transition-all duration-200">
+<div class="p-card-padding flex items-center gap-4">
+<div class="flex flex-col text-text-muted">
+<button class="hover:text-text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">expand_less</span></button>
+<button class="hover:text-text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">expand_more</span></button>
+</div>
+<div class="flex-grow">
+<div class="flex items-center gap-3">
+<h3 class="font-card-title text-card-title text-text-primary">团队凭证归类</h3>
+<span class="bg-accent-soft text-primary px-2 py-0.5 rounded-full text-[11px] font-medium">匹配 12 个凭证</span>
+</div>
+<p class="font-mono-md text-mono-md text-text-muted mt-1">字段: <span class="text-primary font-bold">plan_type</span>: <span class="text-secondary">^team$</span> → <span class="text-secondary-fixed-dim">team</span></p>
+</div>
+<div class="flex items-center gap-4">
+<!-- Toggle Switch -->
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer switch-input" type="checkbox"/>
+<div class="w-9 h-5 bg-surface-variant peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-accent-ring rounded-full switch-slider transition-colors relative before:content-[''] before:absolute before:top-[2px] before:left-[2px] before:bg-white before:border-gray-300 before:rounded-full before:h-4 before:w-4 before:transition-transform"></div>
+</label>
+<div class="flex gap-1">
+<button class="h-btn-sm-height px-3 rounded hover:bg-row-hover text-primary transition-colors font-body-md">编辑</button>
+<button class="h-btn-sm-height px-3 rounded hover:bg-danger-soft text-danger transition-colors font-body-md">删除</button>
+</div>
+</div>
+</div>
+<!-- Expanded Detail Panel -->
+<div class="bg-surface-container-low border-t border-border px-card-padding py-4 ml-[44px]">
+<div class="flex flex-col gap-2 mb-4">
+<div class="flex items-center justify-between font-mono-sm text-mono-sm text-text-muted py-1 border-b border-border-strong border-dashed">
+<span>codex-team-001.json</span>
+<span class="text-[10px] uppercase opacity-60">Matches: plan_type=team</span>
+</div>
+<div class="flex items-center justify-between font-mono-sm text-mono-sm text-text-muted py-1 border-b border-border-strong border-dashed">
+<span>codex-team-002.json</span>
+<span class="text-[10px] uppercase opacity-60">Matches: plan_type=team</span>
+</div>
+<div class="flex items-center justify-between font-mono-sm text-mono-sm text-text-muted py-1 border-b border-border-strong border-dashed">
+<span>alpha-internal-team.key</span>
+<span class="text-[10px] uppercase opacity-60">Matches: plan_type=team</span>
+</div>
+<div class="flex items-center justify-between font-mono-sm text-mono-sm text-text-muted py-1 border-b border-border-strong border-dashed">
+<span>dev-ops-team-vault.json</span>
+<span class="text-[10px] uppercase opacity-60">Matches: plan_type=team</span>
+</div>
+</div>
+<!-- Pagination -->
+<div class="flex items-center justify-center gap-4 font-body-md text-[13px]">
+<button class="text-text-muted hover:text-text-primary disabled:opacity-30" disabled="">上一页</button>
+<span class="text-text-primary font-medium">1 / 5</span>
+<button class="text-text-muted hover:text-text-primary">下一页</button>
+</div>
+</div>
+</div>
+<!-- Rule Card 2 -->
+<div class="bg-surface border border-border rounded-[10px] rule-card transition-all duration-200">
+<div class="p-card-padding flex items-center gap-4">
+<div class="flex flex-col text-text-muted">
+<button class="hover:text-text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">expand_less</span></button>
+<button class="hover:text-text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">expand_more</span></button>
+</div>
+<div class="flex-grow">
+<div class="flex items-center gap-3">
+<h3 class="font-card-title text-card-title text-text-primary">免费凭证检测</h3>
+<span class="bg-accent-soft text-primary px-2 py-0.5 rounded-full text-[11px] font-medium">匹配 42 个凭证</span>
+</div>
+<p class="font-mono-md text-mono-md text-text-muted mt-1">字段: <span class="text-primary font-bold">tier</span>: <span class="text-secondary">^free$</span> → <span class="text-secondary-fixed-dim">free</span></p>
+</div>
+<div class="flex items-center gap-4">
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer switch-input" type="checkbox"/>
+<div class="w-9 h-5 bg-surface-variant peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-accent-ring rounded-full switch-slider transition-colors relative before:content-[''] before:absolute before:top-[2px] before:left-[2px] before:bg-white before:border-gray-300 before:rounded-full before:h-4 before:w-4 before:transition-transform"></div>
+</label>
+<div class="flex gap-1">
+<button class="h-btn-sm-height px-3 rounded hover:bg-row-hover text-primary transition-colors font-body-md">编辑</button>
+<button class="h-btn-sm-height px-3 rounded hover:bg-danger-soft text-danger transition-colors font-body-md">删除</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Rule Card 3 -->
+<div class="bg-surface border border-border rounded-[10px] rule-card transition-all duration-200">
+<div class="p-card-padding flex items-center gap-4">
+<div class="flex flex-col text-text-muted">
+<button class="hover:text-text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">expand_less</span></button>
+<button class="hover:text-text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">expand_more</span></button>
+</div>
+<div class="flex-grow">
+<div class="flex items-center gap-3">
+<h3 class="font-card-title text-card-title text-text-primary">过期规则匹配</h3>
+<span class="bg-danger-soft text-danger px-2 py-0.5 rounded-full text-[11px] font-medium">匹配 0 个凭证</span>
+</div>
+<p class="font-mono-md text-mono-md text-text-muted mt-1">字段: <span class="text-primary font-bold">status</span>: <span class="text-secondary">^expired$</span> → <span class="text-secondary-fixed-dim">cleanup</span></p>
+</div>
+<div class="flex items-center gap-4">
+<label class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer switch-input" type="checkbox"/>
+<div class="w-9 h-5 bg-surface-variant peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-accent-ring rounded-full switch-slider transition-colors relative before:content-[''] before:absolute before:top-[2px] before:left-[2px] before:bg-white before:border-gray-300 before:rounded-full before:h-4 before:w-4 before:transition-transform"></div>
+</label>
+<div class="flex gap-1">
+<button class="h-btn-sm-height px-3 rounded hover:bg-row-hover text-primary transition-colors font-body-md">编辑</button>
+<button class="h-btn-sm-height px-3 rounded hover:bg-danger-soft text-danger transition-colors font-body-md">删除</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Rule Card 4 -->
+<div class="bg-surface border border-border rounded-[10px] rule-card transition-all duration-200">
+<div class="p-card-padding flex items-center gap-4">
+<div class="flex flex-col text-text-muted">
+<button class="hover:text-text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">expand_less</span></button>
+<button class="hover:text-text-primary transition-colors"><span class="material-symbols-outlined text-[20px]">expand_more</span></button>
+</div>
+<div class="flex-grow">
+<div class="flex items-center gap-3">
+<h3 class="font-card-title text-card-title text-text-primary">旧版 API 路由</h3>
+<span class="bg-accent-soft text-primary px-2 py-0.5 rounded-full text-[11px] font-medium">匹配 156 个凭证</span>
+</div>
+<p class="font-mono-md text-mono-md text-text-muted mt-1">字段: <span class="text-primary font-bold">version</span>: <span class="text-secondary">^v[1-2]$</span> → <span class="text-secondary-fixed-dim">legacy</span></p>
+</div>
+<div class="flex items-center gap-4">
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer switch-input" type="checkbox"/>
+<div class="w-9 h-5 bg-surface-variant peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-accent-ring rounded-full switch-slider transition-colors relative before:content-[''] before:absolute before:top-[2px] before:left-[2px] before:bg-white before:border-gray-300 before:rounded-full before:h-4 before:w-4 before:transition-transform"></div>
+</label>
+<div class="flex gap-1">
+<button class="h-btn-sm-height px-3 rounded hover:bg-row-hover text-primary transition-colors font-body-md">编辑</button>
+<button class="h-btn-sm-height px-3 rounded hover:bg-danger-soft text-danger transition-colors font-body-md">删除</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+<script>
+        // Micro-interactions for toggles and buttons
+        document.querySelectorAll('.rule-card').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                // Potential hover effect logic
+            });
+        });
+        
+        // Simple mock pagination toggle
+        const prevBtn = document.querySelector('button:contains("上一页")');
+        const nextBtn = document.querySelector('button:contains("下一页")');
+        
+        if (nextBtn) {
+            nextBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                console.log('Fetching next page of matches...');
+            });
+        }
+    </script>
+</body></html>

@@ -20,6 +20,17 @@ type Store struct {
 	usage     *usageLedger
 	// flusher for periodically persisting the usage ledger to the state file.
 	flusher *usageFlusher
+	// aliases is the global alias mapping table from config.yaml. Used to
+	// resolve KeyAliasRef → ModelRule for routing and billing.
+	aliases map[string]*AliasMapping
+	// classifyRules are user-defined credential classification rules.
+	classifyRules []ClassifyRule
+	// rrCounters tracks round-robin position per alias name (global, shared
+	// across all keys). Reset on Configure/UpsertKey when aliases change.
+	rrCounters map[string]int
+	// onClassifyRulesChanged is called when classify rules change, so the
+	// plugin can clear its classify cache. Set by the plugin App.
+	onClassifyRulesChanged func()
 }
 
 type AuthDecision struct {
@@ -43,10 +54,11 @@ type AuthDecision struct {
 
 func NewStore() *Store {
 	return &Store{
-		enabled: DefaultConfig().Enabled,
-		keys:    make(map[string]*KeyConfig),
-		limiter: NewRateLimiter(),
-		usage:   newUsageLedger(time.Now),
+		enabled:   DefaultConfig().Enabled,
+		keys:      make(map[string]*KeyConfig),
+		limiter:   NewRateLimiter(),
+		usage:     newUsageLedger(time.Now),
+		rrCounters: make(map[string]int),
 	}
 }
 
@@ -83,9 +95,26 @@ func (s *Store) Configure(cfg Config) error {
 	if state, errLoad := LoadState(statePath); errLoad == nil {
 		keys = state.Keys
 		loadedUsage = state.Usage
-		if errNorm := normalizeConfig(&Config{Enabled: cfg.Enabled, StateFile: cfg.StateFile, Keys: keys}); errNorm != nil {
+		// If config.yaml has no global alias table, fall back to the one
+		// persisted in state (so state-only reloads resolve key alias refs).
+		stateAliases := cfg.Aliases
+		if len(stateAliases) == 0 && len(state.Aliases) > 0 {
+			stateAliases = state.Aliases
+		}
+		stateRules := cfg.ClassifyRules
+		if len(stateRules) == 0 && len(state.ClassifyRules) > 0 {
+			stateRules = state.ClassifyRules
+		}
+		// Validate state keys against the global alias table. normalizeConfig
+		// also auto-migrates any state keys still using per-key Models.
+		merged := Config{Enabled: cfg.Enabled, StateFile: cfg.StateFile, Keys: keys, Aliases: stateAliases, ClassifyRules: stateRules}
+		if errNorm := normalizeConfig(&merged); errNorm != nil {
 			return fmt.Errorf("load state: %w", errNorm)
 		}
+		keys = merged.Keys
+		// Propagate the resolved alias table back to cfg for downstream use.
+		cfg.Aliases = merged.Aliases
+		cfg.ClassifyRules = merged.ClassifyRules
 	} else if !errors.Is(errLoad, os.ErrNotExist) {
 		return fmt.Errorf("load state: %w", errLoad)
 	} else {
@@ -94,6 +123,12 @@ func (s *Store) Configure(cfg Config) error {
 
 	next := make(map[string]*KeyConfig, len(keys))
 	now := time.Now().UTC()
+	// Build the global alias lookup from the config (post-migration).
+	aliasLookup := make(map[string]*AliasMapping, len(cfg.Aliases))
+	for i := range cfg.Aliases {
+		aliasLookup[strings.ToLower(cfg.Aliases[i].Alias)] = &cfg.Aliases[i]
+	}
+
 	for i := range keys {
 		item := keys[i]
 		if item.CreatedAt.IsZero() {
@@ -101,6 +136,13 @@ func (s *Store) Configure(cfg Config) error {
 		}
 		if item.UpdatedAt.IsZero() {
 			item.UpdatedAt = item.CreatedAt
+		}
+		// If the key has Aliases refs, populate Models from the global table
+		// so all downstream code (routing, billing, usage) works
+		// unchanged. For round-robin aliases with multiple targets, we expand
+		// to one ModelRule per target (the scheduler picks based on group).
+		if len(item.Aliases) > 0 {
+			item.Models = resolveAliasRefsToModels(item.Aliases, aliasLookup)
 		}
 		next[item.ID] = &item
 	}
@@ -131,6 +173,12 @@ func (s *Store) Configure(cfg Config) error {
 	}
 	s.enabled = cfg.Enabled
 	s.statePath = statePath
+	// Store the global alias table and classify rules for routing/billing.
+	s.aliases = make(map[string]*AliasMapping, len(cfg.Aliases))
+	for i := range cfg.Aliases {
+		s.aliases[strings.ToLower(cfg.Aliases[i].Alias)] = &cfg.Aliases[i]
+	}
+	s.classifyRules = cfg.ClassifyRules
 	s.keys = next
 	if s.limiter == nil {
 		s.limiter = NewRateLimiter()
@@ -151,7 +199,9 @@ func (s *Store) Configure(cfg Config) error {
 	if firstBoot {
 		baseKeys := s.keysSnapshotLocked()
 		baseUsage := s.usageSnapshotLocked()
-		if errSave := SaveState(statePath, baseKeys, baseUsage); errSave != nil {
+		baseAliases := s.aliasesSnapshotLocked()
+		baseRules := s.classifyRulesSnapshotLocked()
+		if errSave := SaveState(statePath, baseKeys, baseUsage, baseAliases, baseRules); errSave != nil {
 			return fmt.Errorf("seed state: %w", errSave)
 		}
 	}
@@ -263,11 +313,44 @@ func (s *Store) Route(headers http.Header, query map[string][]string, requested 
 	if key == nil || !key.Enabled {
 		return ModelRule{}, "", false
 	}
-	rule, ok := key.ModelForAlias(requested)
+	rule, ok := s.resolveRuleForAlias(key, requested)
 	if !ok {
 		return ModelRule{}, key.ID, false
 	}
 	return rule, key.ID, true
+}
+
+// resolveRuleForAlias selects the ModelRule for the requested alias, applying
+// the global alias's dispatch mode. For "round-robin" with multiple targets,
+// it rotates through the targets using a global counter (shared across all
+// keys). For "priority", it always returns the first target.
+func (s *Store) resolveRuleForAlias(key *KeyConfig, requested string) (ModelRule, bool) {
+	// Collect all ModelRules matching the alias (a multi-target alias expands
+	// to multiple rules with the same alias but different provider/model/group).
+	var matches []ModelRule
+	for _, rule := range key.Models {
+		if strings.EqualFold(rule.Alias, requested) {
+			matches = append(matches, rule)
+		}
+	}
+	if len(matches) == 0 {
+		return ModelRule{}, false
+	}
+	if len(matches) == 1 {
+		return matches[0], true
+	}
+	// Multiple targets: check the global alias's dispatch mode.
+	alias := s.aliases[strings.ToLower(requested)]
+	if alias != nil && strings.EqualFold(alias.Dispatch, "priority") {
+		return matches[0], true // static priority: always first
+	}
+	// Round-robin (default): rotate using a global counter.
+	idx := s.rrCounters[strings.ToLower(requested)]
+	if idx >= len(matches) {
+		idx = 0
+	}
+	s.rrCounters[strings.ToLower(requested)] = (idx + 1) % len(matches)
+	return matches[idx], true
 }
 
 func (s *Store) ResponseAlias(headers http.Header, query map[string][]string, requested string) (string, bool) {
@@ -474,6 +557,11 @@ func (s *Store) AliasUsageFor(keyID string) (KeyConfig, []AliasUsageEntry, bool)
 	return *key, s.usage.AliasUsage(*key), true
 }
 
+// FindByAPIKey resolves a downstream plain key to policy (copy). Returns nil when unknown.
+func (s *Store) FindByAPIKey(raw string) *KeyConfig {
+	return s.findBySecret(raw)
+}
+
 func (s *Store) findBySecret(raw string) *KeyConfig {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -527,6 +615,53 @@ func (k *KeyConfig) ModelForAlias(alias string) (ModelRule, bool) {
 	return ModelRule{}, false
 }
 
+// resolveAliasRefsToModels expands a key's Alias refs into concrete ModelRule
+// entries using the global alias table. For round-robin aliases with multiple
+// targets, each target becomes a separate ModelRule (same alias, different
+// provider/model/group) — the routing layer selects one at request time. Per-key
+// price overrides on KeyAliasRef take precedence over the global alias pricing.
+func resolveAliasRefsToModels(refs []KeyAliasRef, aliases map[string]*AliasMapping) []ModelRule {
+	var out []ModelRule
+	for _, ref := range refs {
+		a, ok := aliases[strings.ToLower(ref.Alias)]
+		if !ok {
+			continue
+		}
+		for _, t := range a.Targets {
+			rule := ModelRule{
+				Alias:       a.Alias,
+				Provider:    t.Provider,
+				TargetModel: t.TargetModel,
+				Group:       t.Group,
+				BillingMode: a.BillingMode,
+			}
+			// Apply per-key price overrides (nil = use global default).
+			if ref.InputPricePerMillion != nil {
+				rule.InputPricePerMillion = *ref.InputPricePerMillion
+			} else {
+				rule.InputPricePerMillion = a.InputPricePerMillion
+			}
+			if ref.OutputPricePerMillion != nil {
+				rule.OutputPricePerMillion = *ref.OutputPricePerMillion
+			} else {
+				rule.OutputPricePerMillion = a.OutputPricePerMillion
+			}
+			if ref.CacheReadPricePerMillion != nil {
+				rule.CacheReadPricePerMillion = *ref.CacheReadPricePerMillion
+			} else {
+				rule.CacheReadPricePerMillion = a.CacheReadPricePerMillion
+			}
+			if ref.PerCallUSD != nil {
+				rule.PerCallUSD = *ref.PerCallUSD
+			} else {
+				rule.PerCallUSD = a.PerCallUSD
+			}
+			out = append(out, rule)
+		}
+	}
+	return out
+}
+
 func (s *Store) Keys() []KeyConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -538,6 +673,7 @@ func (s *Store) keysSnapshotLocked() []KeyConfig {
 	for _, key := range s.keys {
 		copy := *key
 		copy.Models = append([]ModelRule(nil), key.Models...)
+		copy.Aliases = append([]KeyAliasRef(nil), key.Aliases...)
 		keys = append(keys, copy)
 	}
 	// Bug 5 fix: stable order by ID so list APIs and frontend rendering are
@@ -547,8 +683,56 @@ func (s *Store) keysSnapshotLocked() []KeyConfig {
 	return keys
 }
 
+// aliasesSnapshotLocked returns a copy of the global alias table.
+// Caller must hold s.mu.
+func (s *Store) aliasesSnapshotLocked() []AliasMapping {
+	out := make([]AliasMapping, 0, len(s.aliases))
+	for _, a := range s.aliases {
+		copy := *a
+		copy.Targets = append([]AliasTarget(nil), a.Targets...)
+		out = append(out, copy)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Alias < out[j].Alias })
+	return out
+}
+
+// AliasesSnapshot returns a copy of the global alias table (thread-safe).
+func (s *Store) AliasesSnapshot() []AliasMapping {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.aliasesSnapshotLocked()
+}
+
+// classifyRulesSnapshotLocked returns a copy of the classify rules.
+// Caller must hold s.mu.
+func (s *Store) classifyRulesSnapshotLocked() []ClassifyRule {
+	return append([]ClassifyRule(nil), s.classifyRules...)
+}
+
+// ClassifyRulesSnapshot returns a copy of the classify rules (thread-safe).
+func (s *Store) ClassifyRulesSnapshot() []ClassifyRule {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.classifyRulesSnapshotLocked()
+}
+
+// updateAliasesLocked replaces the store's global alias table.
+func (s *Store) updateAliasesLocked(aliases []AliasMapping) {
+	s.aliases = make(map[string]*AliasMapping, len(aliases))
+	for i := range aliases {
+		s.aliases[strings.ToLower(aliases[i].Alias)] = &aliases[i]
+	}
+}
+
 func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
-	cfg := Config{Enabled: true, StateFile: s.StatePath(), Keys: []KeyConfig{input}}
+	// Build a config that includes the store's current global alias table
+	// and classify rules, so normalizeConfig can validate the key's alias
+	// references and migrate any per-key Models into existing or new aliases.
+	s.mu.RLock()
+	existingAliases := s.aliasesSnapshotLocked()
+	existingRules := s.classifyRulesSnapshotLocked()
+	s.mu.RUnlock()
+	cfg := Config{Enabled: true, StateFile: s.StatePath(), Keys: []KeyConfig{input}, Aliases: existingAliases, ClassifyRules: existingRules}
 	if err := normalizeConfig(&cfg); err != nil {
 		return err
 	}
@@ -561,13 +745,23 @@ func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
 		key.CreatedAt = now
 	}
 	key.UpdatedAt = now
+	// Populate Models from the key's Alias refs + global table for downstream use.
+	if len(key.Aliases) > 0 {
+		aliasLookup := make(map[string]*AliasMapping, len(cfg.Aliases))
+		for i := range cfg.Aliases {
+			aliasLookup[strings.ToLower(cfg.Aliases[i].Alias)] = &cfg.Aliases[i]
+		}
+		key.Models = resolveAliasRefsToModels(key.Aliases, aliasLookup)
+	}
 	s.keys[key.ID] = &key
+	// Update the store's global alias table if migration added new aliases.
+	s.updateAliasesLocked(cfg.Aliases)
 	keys := s.keysSnapshotLocked()
 	path := s.statePath
 	usage := s.usageSnapshotLocked()
 	s.mu.Unlock()
 	if persist {
-		return SaveState(path, keys, usage)
+		return SaveState(path, keys, usage, s.aliasesSnapshotLocked(), s.classifyRulesSnapshotLocked())
 	}
 	return nil
 }
@@ -593,7 +787,7 @@ func (s *Store) DeleteKey(id string) error {
 	if s.usage != nil {
 		s.usage.resetUsage(id)
 	}
-	return SaveState(path, keys, usage)
+	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
 }
 
 func (s *Store) RotateKey(id string) (string, KeyConfig, error) {
@@ -627,7 +821,7 @@ func (s *Store) RotateKey(id string) (string, KeyConfig, error) {
 	if s.limiter != nil {
 		s.limiter.Reset(id)
 	}
-	if err := SaveState(path, keys, usage); err != nil {
+	if err := SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot()); err != nil {
 		return "", KeyConfig{}, err
 	}
 	return plain, copy, nil
@@ -641,6 +835,214 @@ func (s *Store) ResetRPM(id string) error {
 		s.limiter.Reset(id)
 	}
 	return nil
+}
+
+// --- Global alias mapping table management ---
+
+// UpsertAlias adds or replaces an alias in the global table. Validates the
+// alias (non-empty name, at least one target, valid dispatch/billing mode).
+// Persists the full state to disk.
+func (s *Store) UpsertAlias(alias AliasMapping) error {
+	// Build a temp config to validate the single alias.
+	existing := s.AliasesSnapshot()
+	// Replace or append.
+	found := false
+	for i, a := range existing {
+		if strings.EqualFold(a.Alias, alias.Alias) {
+			existing[i] = alias
+			found = true
+			break
+		}
+	}
+	if !found {
+		existing = append(existing, alias)
+	}
+	tmp := Config{Enabled: true, StateFile: s.StatePath(), Aliases: existing}
+	if err := normalizeConfig(&tmp); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.updateAliasesLocked(tmp.Aliases)
+	// Re-resolve all keys' Models from the updated alias table.
+	s.resolveAllModelsLocked()
+	keys := s.keysSnapshotLocked()
+	usage := s.usageSnapshotLocked()
+	path := s.statePath
+	s.mu.Unlock()
+	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+}
+
+// DeleteAlias removes an alias from the global table. Returns an error if any
+// key still references it (must remove references first).
+func (s *Store) DeleteAlias(aliasName string) error {
+	aliasName = strings.TrimSpace(aliasName)
+	if aliasName == "" {
+		return errors.New("alias name is required")
+	}
+	// Check for key references.
+	s.mu.RLock()
+	refCount := 0
+	for _, key := range s.keys {
+		for _, ref := range key.Aliases {
+			if strings.EqualFold(ref.Alias, aliasName) {
+				refCount++
+			}
+		}
+	}
+	s.mu.RUnlock()
+	if refCount > 0 {
+		return errors.New("alias is referenced by " + itoa(refCount) + " key(s); remove references first")
+	}
+	existing := s.AliasesSnapshot()
+	filtered := existing[:0]
+	for _, a := range existing {
+		if !strings.EqualFold(a.Alias, aliasName) {
+			filtered = append(filtered, a)
+		}
+	}
+	s.mu.Lock()
+	s.updateAliasesLocked(filtered)
+	keys := s.keysSnapshotLocked()
+	usage := s.usageSnapshotLocked()
+	path := s.statePath
+	s.mu.Unlock()
+	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+}
+
+// --- Classification rule management ---
+
+// UpsertClassifyRule adds or replaces a classification rule. Validates the
+// regex pattern. Persists the full state to disk.
+func (s *Store) UpsertClassifyRule(rule ClassifyRule) error {
+	existing := s.ClassifyRulesSnapshot()
+	found := false
+	for i, r := range existing {
+		if strings.EqualFold(r.Name, rule.Name) {
+			existing[i] = rule
+			found = true
+			break
+		}
+	}
+	if !found {
+		existing = append(existing, rule)
+	}
+	tmp := Config{Enabled: true, StateFile: s.StatePath(), ClassifyRules: existing}
+	if err := normalizeConfig(&tmp); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.classifyRules = tmp.ClassifyRules
+	// Clear the classify cache since rules changed.
+	s.onClassifyRulesChangedSafe()
+	keys := s.keysSnapshotLocked()
+	usage := s.usageSnapshotLocked()
+	path := s.statePath
+	s.mu.Unlock()
+	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+}
+
+// DeleteClassifyRule removes a classification rule by name.
+func (s *Store) DeleteClassifyRule(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("rule name is required")
+	}
+	existing := s.ClassifyRulesSnapshot()
+	filtered := existing[:0]
+	for _, r := range existing {
+		if !strings.EqualFold(r.Name, name) {
+			filtered = append(filtered, r)
+		}
+	}
+	s.mu.Lock()
+	s.classifyRules = filtered
+	s.onClassifyRulesChangedSafe()
+	keys := s.keysSnapshotLocked()
+	usage := s.usageSnapshotLocked()
+	path := s.statePath
+	s.mu.Unlock()
+	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+}
+
+// ReorderClassifyRules reorders the classification rules to match the given
+// name order. Rules not in the list keep their relative order at the end.
+func (s *Store) ReorderClassifyRules(names []string) error {
+	existing := s.ClassifyRulesSnapshot()
+	byName := make(map[string]ClassifyRule)
+	for _, r := range existing {
+		byName[strings.ToLower(r.Name)] = r
+	}
+	var reordered []ClassifyRule
+	used := make(map[string]bool)
+	for _, name := range names {
+		if r, ok := byName[strings.ToLower(name)]; ok {
+			reordered = append(reordered, r)
+			used[strings.ToLower(name)] = true
+		}
+	}
+	for _, r := range existing {
+		if !used[strings.ToLower(r.Name)] {
+			reordered = append(reordered, r)
+		}
+	}
+	s.mu.Lock()
+	s.classifyRules = reordered
+	s.onClassifyRulesChangedSafe()
+	keys := s.keysSnapshotLocked()
+	usage := s.usageSnapshotLocked()
+	path := s.statePath
+	s.mu.Unlock()
+	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+}
+
+// resolveAllModelsLocked re-populates every key's Models from its Aliases
+// refs + the global alias table. Caller must hold s.mu.
+func (s *Store) resolveAllModelsLocked() {
+	for _, key := range s.keys {
+		if len(key.Aliases) > 0 {
+			key.Models = resolveAliasRefsToModels(key.Aliases, s.aliases)
+		}
+	}
+}
+
+// itoa is a minimal int→string to avoid importing strconv in this file.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
+
+// SetOnClassifyRulesChanged registers a callback fired when classify rules
+// change, so the plugin can clear its classify cache.
+func (s *Store) SetOnClassifyRulesChanged(fn func()) {
+	s.mu.Lock()
+	s.onClassifyRulesChanged = fn
+	s.mu.Unlock()
+}
+
+// onClassifyRulesChangedSafe calls the callback if set (nil-safe). Caller may
+// hold s.mu — we read the field then call outside the lock.
+func (s *Store) onClassifyRulesChangedSafe() {
+	fn := s.onClassifyRulesChanged
+	if fn != nil {
+		fn()
+	}
 }
 
 // usageSnapshotLocked returns a deep copy of the usage ledger. Caller must
@@ -730,13 +1132,14 @@ func (s *Store) Status() map[string]any {
 	statePath := s.statePath
 	keyCount := len(s.keys)
 	s.mu.RUnlock()
-	return map[string]any{
+	out := map[string]any{
 		"enabled":    enabled,
 		"state_file": statePath,
 		"key_count":  keyCount,
 		"rpm_usage":  s.limiter.Snapshot(),
 		"usage":      s.usageUsageLocked(),
 	}
+	return out
 }
 
 // usageUsageLocked returns a summary map of all keys' usage (for status).

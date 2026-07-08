@@ -139,8 +139,20 @@ function KeyCard({
   const pct = limit > 0 ? Math.min(100, (k.usage.daily_usd / limit) * 100) : 0;
   const over = limit > 0 && k.usage.daily_usd >= limit;
   const models = k.models ?? [];
-  const shownChips = models.slice(0, 2).map((m) => m.alias);
-  const moreCount = Math.max(0, models.length - 2);
+  // Deduplicate by alias name for display: a multi-target alias resolves
+  // to multiple ModelRules sharing one alias, but the key list should show
+  // each alias once (not 'test' twice for a 2-target alias).
+  const uniqueAliases: string[] = [];
+  const seenAlias = new Set<string>();
+  for (const m of models) {
+    const key = (m.alias ?? "").toLowerCase();
+    if (key && !seenAlias.has(key)) {
+      seenAlias.add(key);
+      uniqueAliases.push(m.alias);
+    }
+  }
+  const shownChips = uniqueAliases.slice(0, 2);
+  const moreCount = Math.max(0, uniqueAliases.length - 2);
 
   const onPointerDown = (e: React.PointerEvent) => {
     dragging.current = true; horizontal.current = false; moved.current = false;
@@ -208,14 +220,14 @@ function KeyCard({
           <div className="kc-bar"><span style={{ width: pct + "%" }} /></div>
           <div className="kc-meta">
             <span>${k.usage.daily_usd.toFixed(2)} / ${limit.toFixed(2)}</span>
-            <span>{models.length} {t("keys.mobile.modelsSuffix")}</span>
+            <span>{uniqueAliases.length} {t("keys.mobile.modelsSuffix")}</span>
           </div>
         </>
       )}
       {limit === 0 && (
         <div className="kc-meta">
           <span>${k.usage.daily_usd.toFixed(2)} · {t("keys.mobile.noLimit")}</span>
-          <span>{models.length} {t("keys.mobile.modelsSuffix")}</span>
+          <span>{uniqueAliases.length} {t("keys.mobile.modelsSuffix")}</span>
         </div>
       )}
       {shownChips.length > 0 && (
