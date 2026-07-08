@@ -338,10 +338,37 @@ func migrateModelsToAliases(cfg *Config) {
 	}
 	for i := range cfg.Keys {
 		key := &cfg.Keys[i]
-		if len(key.Aliases) > 0 || len(key.Models) == 0 {
-			continue // already migrated or no models to migrate
+		if len(key.Models) == 0 {
+			// No Models to migrate. Leave existing Aliases intact — this is the
+		// normal reload path where Models is a derived field (stripped from
+		// disk by SaveState and repopulated in memory by Configure). Only the
+		// PATCH path sends non-nil Models, and an explicit clear sends Models
+		// as an empty non-nil slice which still falls through to the
+		// reconciliation below and correctly drops all alias refs.
+			continue
 		}
-		refSeen := map[string]struct{}{} // dedup refs for THIS key by alias name
+		// Build the set of alias names present in this key's Models — this is
+		// the authoritative list the user wants. Reconcile the key's existing
+		// Aliases against it: keep refs whose alias still has a Model entry,
+		// drop refs whose alias was removed, and add refs for newly added
+		// alias names. Price overrides on surviving refs are preserved.
+		modelAliasNames := make(map[string]struct{}, len(key.Models))
+		for _, m := range key.Models {
+			modelAliasNames[strings.ToLower(m.Alias)] = struct{}{}
+		}
+		var reconciled []KeyAliasRef
+		refSeen := map[string]struct{}{} // dedup reconciled by alias name
+		for _, ref := range key.Aliases {
+			lk := strings.ToLower(ref.Alias)
+			if _, ok := modelAliasNames[lk]; !ok {
+				continue // this alias was removed from the key's models
+			}
+			if _, dup := refSeen[lk]; dup {
+				continue // dedup
+			}
+			refSeen[lk] = struct{}{}
+			reconciled = append(reconciled, ref) // preserve price overrides
+		}
 		for _, m := range key.Models {
 			al := strings.ToLower(m.Alias)
 			var ai int
@@ -366,7 +393,7 @@ func migrateModelsToAliases(cfg *Config) {
 			_ = ai // ai is the alias index; we don't need it below since the ref
 			//      carries the name and the key's resolveAliasRefsToModels
 			//      re-looks-up the alias by name at Configure time.
-			// Add a KeyAliasRef only once per alias name for this key.
+			// Add a KeyAliasRef only if this alias isn't already in reconciled.
 			if _, dup := refSeen[al]; dup {
 				continue
 			}
@@ -375,8 +402,9 @@ func migrateModelsToAliases(cfg *Config) {
 			// taken from the ModelRule that first created (or defined) it, which
 			// is good enough for migration. Future per-key overrides are a manual
 			// UI action.
-			key.Aliases = append(key.Aliases, KeyAliasRef{Alias: m.Alias})
+			reconciled = append(reconciled, KeyAliasRef{Alias: m.Alias})
 		}
+		key.Aliases = reconciled
 		// Clear Models — the canonical source is now Aliases.
 		key.Models = nil
 	}

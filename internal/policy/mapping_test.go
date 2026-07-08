@@ -581,10 +581,14 @@ keys:
 	if err != nil {
 		t.Fatalf("disk Models with duplicate alias names should be accepted, got: %v", err)
 	}
-	// Migration leaves gemma's Models as-is (Aliases already set). The
-	// Configure-time resolution will overwrite them with freshly-resolved rules.
-	if len(cfg.Keys[0].Models) != 2 {
-		t.Fatalf("expected 2 disk Models intact (Configure overwrites later), got %d", len(cfg.Keys[0].Models))
+	// Migration reconciles gemma's Aliases with the disk Models: the disk
+	// Models both have alias "test" which already has a ref, so the ref is
+	// preserved (deduped). Models is cleared (canonical source = Aliases).
+	if len(cfg.Keys[0].Models) != 0 {
+		t.Fatalf("migration should clear Models, got %d", len(cfg.Keys[0].Models))
+	}
+	if len(cfg.Keys[0].Aliases) != 1 || cfg.Keys[0].Aliases[0].Alias != "test" {
+		t.Fatalf("expected single deduped ref {test}, got %+v", cfg.Keys[0].Aliases)
 	}
 }
 
@@ -627,3 +631,91 @@ func TestSaveStateStripsDerivedModels(t *testing.T) {
 }
 
 func ptrF(v float64) *float64 { return &v }
+
+// TestEditExistingKeyAddsAliasRef reproduces the user's bug: editing a key
+// that already has alias refs and adding a new alias via the frontend (which
+// submits the full Models list). The old migration skipped keys that already
+// had Aliases, so the new alias never made it into the key's Aliases and was
+// silently dropped on save. The fixed migration reconciles Aliases with the
+// submitted Models: adds new refs, drops removed refs, preserves surviving
+// price overrides.
+func TestEditExistingKeyAddsAliasRef(t *testing.T) {
+	yaml := []byte(`
+enabled: true
+state_file: "s.json"
+aliases:
+  - alias: existing
+    targets: [{provider: openai, target_model: gpt-4o}]
+    dispatch: round-robin
+    billing_mode: tokens
+  - alias: new-alias
+    targets: [{provider: anthropic, target_model: claude-3}]
+    dispatch: round-robin
+    billing_mode: tokens
+keys:
+  - id: k
+    enabled: true
+    key_hash: x
+    aliases:
+      - alias: existing
+    # Frontend submits the FULL models list (existing + new). Migration must
+    # add a ref for new-alias without dropping existing.
+    models:
+      - {alias: existing, provider: openai, target_model: gpt-4o}
+      - {alias: new-alias, provider: anthropic, target_model: claude-3}
+`)
+	cfg, err := DecodeConfig(yaml)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(cfg.Keys[0].Aliases) != 2 {
+		t.Fatalf("expected 2 alias refs after edit, got %d: %+v", len(cfg.Keys[0].Aliases), cfg.Keys[0].Aliases)
+	}
+	// Verify both refs present.
+	names := map[string]bool{}
+	for _, ref := range cfg.Keys[0].Aliases {
+		names[ref.Alias] = true
+	}
+	if !names["existing"] || !names["new-alias"] {
+		t.Fatalf("expected refs for 'existing' and 'new-alias', got %+v", cfg.Keys[0].Aliases)
+	}
+	// Models cleared after migration.
+	if len(cfg.Keys[0].Models) != 0 {
+		t.Fatalf("Models should be cleared, got %d", len(cfg.Keys[0].Models))
+	}
+}
+
+// TestEditExistingKeyRemovesAliasRef verifies that removing a model (by
+// clicking the chip ×) drops the corresponding alias ref on save.
+func TestEditExistingKeyRemovesAliasRef(t *testing.T) {
+	yaml := []byte(`
+enabled: true
+state_file: "s.json"
+aliases:
+  - alias: keep
+    targets: [{provider: openai, target_model: gpt-4o}]
+    dispatch: round-robin
+    billing_mode: tokens
+  - alias: drop
+    targets: [{provider: anthropic, target_model: claude-3}]
+    dispatch: round-robin
+    billing_mode: tokens
+keys:
+  - id: k
+    enabled: true
+    key_hash: x
+    aliases:
+      - alias: keep
+      - alias: drop
+    # Frontend submits only the 'keep' model (user removed 'drop' chip).
+    models:
+      - {alias: keep, provider: openai, target_model: gpt-4o}
+`)
+	cfg, err := DecodeConfig(yaml)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(cfg.Keys[0].Aliases) != 1 || cfg.Keys[0].Aliases[0].Alias != "keep" {
+		t.Fatalf("expected single ref {keep}, got %+v", cfg.Keys[0].Aliases)
+	}
+}
