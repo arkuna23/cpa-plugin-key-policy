@@ -26,6 +26,8 @@ export interface ModelRule {
 }
 
 export interface UsageSummary {
+  fixed_usd: number;
+  fixed_limit_usd: number;
   daily_usd: number;
   weekly_usd: number;
   daily_limit_usd: number;
@@ -36,12 +38,16 @@ export interface UsageSummary {
   // cache_read_tokens / (cache_read_tokens + input_tokens).
   daily_cache_cost_usd?: number;
   weekly_cache_cost_usd?: number;
+  fixed_cache_cost_usd?: number;
   daily_cache_read_tokens?: number;
   weekly_cache_read_tokens?: number;
+  fixed_cache_read_tokens?: number;
+  fixed_input_tokens?: number;
   daily_input_tokens?: number;
   weekly_input_tokens?: number;
   // Call counts: successful requests billed into the window (token or
   // per-call). Failed requests don't count. Display only.
+  fixed_call_count?: number;
   daily_call_count?: number;
   weekly_call_count?: number;
 }
@@ -54,6 +60,8 @@ export interface KeyPublic {
   rpm: number;
   models: ModelRule[];
   aliases?: KeyAliasRef[];
+  quota_mode: "fixed" | "periodic";
+  fixed_limit_usd: number;
   daily_limit_usd: number;
   weekly_limit_usd: number;
   // Per-key override for GET /v1/models (see KeyFormValues).
@@ -71,6 +79,8 @@ export interface KeyWriteRequest {
   rpm?: number;
   models?: ModelRule[];
   aliases?: KeyAliasRef[];
+  quota_mode?: "fixed" | "periodic";
+  fixed_limit_usd?: number;
   daily_limit_usd?: number;
   weekly_limit_usd?: number;
   allow_models_endpoint?: boolean;
@@ -112,6 +122,7 @@ export interface AliasUsageEntry {
   billing_mode?: "tokens" | "per_call";
   per_call_usd?: number;
   in_config: boolean;
+  fixed: UsageWindow;
   daily: UsageWindow;
   weekly: UsageWindow;
 }
@@ -119,6 +130,8 @@ export interface AliasUsageEntry {
 export interface KeyUsageResponse {
   key_id: string;
   key_name: string;
+  quota_mode: "fixed" | "periodic";
+  fixed_limit_usd: number;
   daily_limit_usd: number;
   weekly_limit_usd: number;
   aliases: AliasUsageEntry[];

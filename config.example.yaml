@@ -20,6 +20,12 @@ plugins:
           key_hash: "sha256:replace-with-hash"
           key_preview: "cpa_abc...xyz"
           rpm: 60
+          # periodic (default): enforce daily + weekly limits.
+          # fixed: enforce one cumulative limit until explicitly reset.
+          quota_mode: "periodic"
+          fixed_limit_usd: 0
+          daily_limit_usd: 10
+          weekly_limit_usd: 50
           # Either bind models directly…
           models:
             - alias: "fast"

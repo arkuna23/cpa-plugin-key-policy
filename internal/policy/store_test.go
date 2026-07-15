@@ -2,6 +2,7 @@ package policy
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -56,6 +57,42 @@ func TestStoreAuthenticateAllowedAndRoute(t *testing.T) {
 	rule, keyID, ok := store.Route(headers, nil, "fast")
 	if !ok || keyID != "team-a" || rule.Provider != "codex" {
 		t.Fatalf("Route() = %+v, %q, %v", rule, keyID, ok)
+	}
+}
+
+func TestKeyIndexesTrackUpdateRotateAndDelete(t *testing.T) {
+	store, oldPlain := newTestStore(t)
+	key := store.findByID("TEAM-A")
+	if key == nil || store.findBySecret(oldPlain) == nil {
+		t.Fatal("initial ID/hash indexes were not built")
+	}
+
+	newPlain := "cpa_reindexed_key"
+	newHash, err := HashKey(newPlain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key.KeyHash = newHash
+	key.KeyPreview = PreviewKey(newPlain)
+	if err := store.UpsertKey(*key, false); err != nil {
+		t.Fatal(err)
+	}
+	if store.findBySecret(oldPlain) != nil || store.findBySecret(newPlain) == nil {
+		t.Fatal("hash index was not refreshed after update")
+	}
+
+	rotated, _, err := store.RotateKey("team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.findBySecret(newPlain) != nil || store.findBySecret(rotated) == nil {
+		t.Fatal("hash index was not refreshed after rotate")
+	}
+	if err := store.DeleteKey("team-a"); err != nil {
+		t.Fatal(err)
+	}
+	if store.findByID("team-a") != nil || store.findBySecret(rotated) != nil {
+		t.Fatal("indexes retained a deleted key")
 	}
 }
 
@@ -333,6 +370,115 @@ func TestFlushUsagePreservesDiskKeys(t *testing.T) {
 	}
 }
 
+func TestPeriodicUsageFlushSkipsCleanLedger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	hash, err := HashKey("cpa_dirty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore()
+	if err := s.Configure(Config{Enabled: true, StateFile: path, Keys: []KeyConfig{{
+		ID: "k", Enabled: true, KeyHash: hash,
+		Models: []ModelRule{{Alias: "fast", Provider: "openai", TargetModel: "m"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flushUsage(false); err != nil {
+		t.Fatal(err)
+	}
+	afterClean, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterClean) != string(before) {
+		t.Fatal("clean periodic flush rewrote the state file")
+	}
+
+	_ = s.RecordUsage("k", "fast", "m", false, UsageDetail{InputTokens: 1})
+	if err := s.flushUsage(false); err != nil {
+		t.Fatal(err)
+	}
+	afterDirty, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterDirty) == string(before) {
+		t.Fatal("dirty periodic flush did not persist usage")
+	}
+	if err := s.flushUsage(false); err != nil {
+		t.Fatal(err)
+	}
+	afterSecondClean, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterSecondClean) != string(afterDirty) {
+		t.Fatal("second clean periodic flush rewrote the state file")
+	}
+}
+
+func TestStatusConcurrentWithKeyUpdates(t *testing.T) {
+	s, _ := newTestStore(t)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 500; i++ {
+			_ = s.Status()
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		key := s.findByID("team-a")
+		key.Name = "Team " + itoa(i)
+		if err := s.UpsertKey(*key, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	<-done
+}
+
+func TestUsageFlushAndManagementPersistenceAreSerialized(t *testing.T) {
+	s, _ := newTestStore(t)
+	errCh := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			_ = s.RecordUsage("team-a", "fast", "gpt-5-codex", false, UsageDetail{InputTokens: 1})
+			if err := s.flushUsage(false); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}()
+	for i := 0; i < 20; i++ {
+		key := s.findByID("team-a")
+		key.Name = "Persist " + itoa(i)
+		if err := s.UpsertKey(*key, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	<-done
+	select {
+	case err := <-errCh:
+		t.Fatal(err)
+	default:
+	}
+	if err := s.FlushUsage(); err != nil {
+		t.Fatal(err)
+	}
+	state, err := LoadState(s.StatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Keys) != 1 || state.Keys[0].ID != "team-a" {
+		t.Fatalf("persisted state lost management key: %+v", state.Keys)
+	}
+}
+
 // TestKeysSnapshotSortedByID (Bug 5): Keys() returns a deterministic order
 // sorted by ID, not random map-iteration order.
 func TestKeysSnapshotSortedByID(t *testing.T) {
@@ -386,4 +532,25 @@ func imgKey(s *Store, id string) KeyConfig {
 		panic("key not found: " + id)
 	}
 	return *k
+}
+
+func BenchmarkFindBySecretIndexed10K(b *testing.B) {
+	s := NewStore()
+	s.mu.Lock()
+	for i := 0; i < 10_000; i++ {
+		plain := "cpa_benchmark_" + itoa(i)
+		hash, _ := HashKey(plain)
+		id := "key-" + itoa(i)
+		s.keys[id] = &KeyConfig{ID: id, Enabled: true, KeyHash: hash}
+	}
+	s.rebuildKeyIndexesLocked()
+	s.mu.Unlock()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if s.findBySecret("cpa_benchmark_9999") == nil {
+			b.Fatal("indexed key not found")
+		}
+	}
 }

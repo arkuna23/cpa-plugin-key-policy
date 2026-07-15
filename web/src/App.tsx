@@ -85,20 +85,23 @@ function Shell() {
   }
   return (
     <div className="app">
+      <a className="skip-link" href="#main-content">{t("header.skipToContent")}</a>
       <TopNav />
-      <Routes>
-        <Route path="/keys" element={<KeyList />} />
-        <Route path="/keys/new" element={<KeyNew />} />
-        <Route path="/keys/new/models" element={<ModelPick />} />
-        <Route path="/keys/:id/edit" element={<KeyEdit />} />
-        <Route path="/keys/:id/edit/models" element={<ModelPick />} />
-        <Route path="/mapping/pick-target" element={<ModelPick />} />
-        <Route path="/keys/:id/usage" element={<KeyUsage />} />
-        <Route path="/mapping" element={<Mapping />} />
-        <Route path="/mapping/alias/:aliasName" element={<AliasEditForm />} />
-        <Route path="/mapping/rule/:ruleName" element={<RuleEditForm />} />
-        <Route path="*" element={<Navigate to="/keys" replace />} />
-      </Routes>
+      <main id="main-content" tabIndex={-1}>
+        <Routes>
+          <Route path="/keys" element={<KeyList />} />
+          <Route path="/keys/new" element={<KeyNew />} />
+          <Route path="/keys/new/models" element={<ModelPick />} />
+          <Route path="/keys/:id/edit" element={<KeyEdit />} />
+          <Route path="/keys/:id/edit/models" element={<ModelPick />} />
+          <Route path="/mapping/pick-target" element={<ModelPick />} />
+          <Route path="/keys/:id/usage" element={<KeyUsage />} />
+          <Route path="/mapping" element={<Mapping />} />
+          <Route path="/mapping/alias/:aliasName" element={<AliasEditForm />} />
+          <Route path="/mapping/rule/:ruleName" element={<RuleEditForm />} />
+          <Route path="*" element={<Navigate to="/keys" replace />} />
+        </Routes>
+      </main>
     </div>
   );
 }

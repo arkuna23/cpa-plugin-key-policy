@@ -9,6 +9,56 @@ import (
 	"time"
 )
 
+func TestUsageSnapshotDeepCopiesAliasMap(t *testing.T) {
+	ledger := newUsageLedger(time.Now)
+	ledger.RecordCost("key", "fast", 1, 0, 0, 1, 1, 1)
+	snapshot := ledger.snapshot()
+
+	ledger.RecordCost("key", "fast", 2, 0, 0, 1, 1, 1)
+	got := snapshot["key"].ByAlias["fast"].Daily.TotalUSD
+	if got != 1 {
+		t.Fatalf("snapshot changed after live write: got %v, want 1", got)
+	}
+}
+
+func TestUsageSnapshotCanMarshalDuringWrites(t *testing.T) {
+	ledger := newUsageLedger(time.Now)
+	for i := 0; i < 32; i++ {
+		ledger.RecordCost("key", "alias-"+itoa(i), 1, 0, 0, 1, 1, 1)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 1000; i++ {
+			ledger.RecordCost("key", "alias-"+itoa(i%32), 1, 0, 0, 1, 1, 1)
+		}
+	}()
+	for {
+		if _, err := json.Marshal(ledger.snapshot()); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-done:
+			return
+		default:
+		}
+	}
+}
+
+func TestUsageDirtyVersionPreservesConcurrentWrite(t *testing.T) {
+	ledger := newUsageLedger(time.Now)
+	ledger.RecordCost("key", "fast", 1, 0, 0, 1, 1, 1)
+	_, version, dirty := ledger.snapshotIfDirty()
+	if !dirty {
+		t.Fatal("usage should be dirty after a write")
+	}
+	ledger.RecordCost("key", "fast", 1, 0, 0, 1, 1, 1)
+	ledger.markFlushed(version)
+	if _, _, stillDirty := ledger.snapshotIfDirty(); !stillDirty {
+		t.Fatal("newer write was incorrectly marked clean")
+	}
+}
+
 func newClockedStore(t *testing.T, now time.Time) (*Store, time.Time) {
 	t.Helper()
 	tm := now
@@ -778,5 +828,83 @@ func TestCallCountIncrementedTokenMode(t *testing.T) {
 	s := store.UsageSummaryFor(store.Keys()[0])
 	if s.DailyCallCount != 2 {
 		t.Fatalf("token-mode daily call count = %d, want 2", s.DailyCallCount)
+	}
+}
+
+func TestFixedQuotaDoesNotResetAcrossPeriodicWindows(t *testing.T) {
+	now := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	ledger := newUsageLedger(func() time.Time { return now })
+	key := KeyConfig{ID: "fixed", QuotaMode: QuotaModeFixed, FixedLimitUSD: 2}
+
+	ledger.RecordCost(key.ID, "fast", 1, 0.1, 10, 20, 30, 1, true)
+	now = now.Add(8 * 24 * time.Hour)
+	s := ledger.Summary(key)
+	if !nearly(s.FixedUSD, 1) || !nearly(s.DailyUSD, 0) || !nearly(s.WeeklyUSD, 0) {
+		t.Fatalf("after periodic windows expire summary = %+v, want fixed=1 daily=0 weekly=0", s)
+	}
+
+	ledger.RecordCost(key.ID, "fast", 1, 0, 0, 0, 0, 1, true)
+	reason, s := ledger.OverLimit(key)
+	if reason != "fixed_quota_exceeded" || !nearly(s.FixedUSD, 2) {
+		t.Fatalf("fixed limit decision = %q %+v", reason, s)
+	}
+}
+
+func TestPeriodicModeDoesNotAccumulateFixedQuota(t *testing.T) {
+	ledger := newUsageLedger(time.Now)
+	key := KeyConfig{ID: "periodic", QuotaMode: QuotaModePeriodic, FixedLimitUSD: 1, DailyLimitUSD: 2}
+	ledger.RecordCost(key.ID, "fast", 1, 0, 0, 0, 0, 1)
+	s := ledger.Summary(key)
+	if s.FixedUSD != 0 || !nearly(s.DailyUSD, 1) {
+		t.Fatalf("periodic summary = %+v, want fixed=0 daily=1", s)
+	}
+	if reason, _ := ledger.OverLimit(key); reason != "" {
+		t.Fatalf("periodic mode incorrectly enforced dormant fixed limit: %q", reason)
+	}
+}
+
+func TestResetFixedQuotaPreservesPeriodicUsageAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := NewStore()
+	if err := store.Configure(Config{
+		Enabled:   true,
+		StateFile: path,
+		Keys: []KeyConfig{{
+			ID: "fixed", Enabled: true, QuotaMode: QuotaModeFixed, FixedLimitUSD: 5,
+			KeyHash: hashForUsageTest(t, "cpa_fixed"),
+			Models:  []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "m", InputPricePerMillion: 1}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer store.StopUsageFlusher()
+
+	store.RecordResponseCost(http.Header{"Authorization": {"Bearer cpa_fixed"}}, nil, "fast", []byte(`{"usage":{"prompt_tokens":1000000}}`))
+	before := store.UsageSummaryFor(store.Keys()[0])
+	if !nearly(before.FixedUSD, 1) || !nearly(before.DailyUSD, 1) {
+		t.Fatalf("before reset = %+v", before)
+	}
+	if err := store.ResetFixedQuota("fixed"); err != nil {
+		t.Fatal(err)
+	}
+	after := store.UsageSummaryFor(store.Keys()[0])
+	if after.FixedUSD != 0 || !nearly(after.DailyUSD, 1) || !nearly(after.WeeklyUSD, 1) {
+		t.Fatalf("after reset = %+v, periodic usage should remain", after)
+	}
+	state, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Version != stateVersion {
+		t.Fatalf("state version = %d, want %d", state.Version, stateVersion)
+	}
+	if len(state.Keys) != 1 || state.Keys[0].ID != "fixed" {
+		t.Fatalf("reset persistence lost key list: %+v", state.Keys)
+	}
+	if got := state.Usage["fixed"].Fixed.TotalUSD; got != 0 {
+		t.Fatalf("persisted fixed total = %v, want 0", got)
+	}
+	if got := state.Usage["fixed"].Daily.TotalUSD; !nearly(got, 1) {
+		t.Fatalf("persisted daily total = %v, want 1", got)
 	}
 }

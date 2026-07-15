@@ -46,26 +46,35 @@ export default function Login() {
       </div>
       <form className="card lp-card" onSubmit={submit}>
         <div className="form-row">
-          <label>{t("login.baseUrl")}</label>
+          <label htmlFor="cpa-base-url">{t("login.baseUrl")}</label>
           <input
+            id="cpa-base-url"
+            name="cpa_base_url"
             className="input"
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             placeholder={t("login.baseUrlPlaceholder")}
-            autoFocus
           />
         </div>
         <div className="form-row">
-          <label>{t("login.managementKey")}</label>
+          <label htmlFor="management-key">{t("login.managementKey")}</label>
           <input
+            id="management-key"
+            name="management_key"
             className="input"
             type="password"
+            autoComplete="off"
+            spellCheck={false}
             value={secretKey}
             onChange={(e) => setSecretKey(e.target.value)}
             placeholder={t("login.managementKeyPlaceholder")}
           />
         </div>
-        {error && <div className="error">{error}</div>}
+        {error && <div className="error" role="alert" aria-live="polite">{error}</div>}
         <button className="btn primary" type="submit" disabled={busy}>
           {busy ? t("login.verifying") : t("login.submit")}
         </button>

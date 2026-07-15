@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { listKeys, deleteKey, rotateKey, resetRPM } from "../api/keys";
+import { Link } from "react-router-dom";
+import { listKeys, deleteKey, rotateKey, resetQuota, resetRPM } from "../api/keys";
 import type { KeyPublic } from "../types";
 import PlainKeyModal from "../components/PlainKeyModal";
 import { useT } from "../i18n";
+
+const usdFormatter = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function fmtUsd(value: number): string {
+  return usdFormatter.format(Number.isFinite(value) ? value : 0);
+}
 
 // Renders a key's daily/weekly dollar usage against its limits. Empty limits
 // (0) show as "不限"; usage at/over a limit is flagged in the danger color so an
@@ -59,6 +70,16 @@ export default function KeyList() {
     }
   };
 
+  const onResetQuota = async (id: string) => {
+    if (!confirm(t("keys.resetQuotaConfirm", { id }))) return;
+    try {
+      await resetQuota(id);
+      void load();
+    } catch (e) {
+      alert((e as Error).message ?? t("keys.resetQuotaFailed"));
+    }
+  };
+
   const onDelete = async (id: string) => {
     if (!confirm(t("keys.deleteConfirm", { id }))) return;
     try {
@@ -93,6 +114,7 @@ export default function KeyList() {
               onDelete={onDelete}
               onRotate={onRotate}
               onReset={onReset}
+              onResetQuota={onResetQuota}
             />
           ))}
         </div>
@@ -122,22 +144,27 @@ function KeyCard({
   onDelete,
   onRotate,
   onReset,
+  onResetQuota,
 }: {
   k: KeyPublic;
   onDelete: (id: string) => void;
   onRotate?: (id: string) => void;
   onReset?: (id: string) => void;
+  onResetQuota?: (id: string) => void;
 }) {
   const t = useT();
-  const nav = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   const [dx, setDx] = useState(0);          // current swipe translate
   const [revoking, setRevoking] = useState(false);
   const startX = useRef(0); const startY = useRef(0); const dragging = useRef(false); const horizontal = useRef(false); const moved = useRef(false);
 
-  const limit = k.usage.daily_limit_usd > 0 ? k.usage.daily_limit_usd : 0;
-  const pct = limit > 0 ? Math.min(100, (k.usage.daily_usd / limit) * 100) : 0;
-  const over = limit > 0 && k.usage.daily_usd >= limit;
+  const fixedQuota = k.quota_mode === "fixed";
+  const limit = fixedQuota
+    ? (k.usage.fixed_limit_usd > 0 ? k.usage.fixed_limit_usd : 0)
+    : (k.usage.daily_limit_usd > 0 ? k.usage.daily_limit_usd : 0);
+  const used = fixedQuota ? (k.usage.fixed_usd ?? 0) : (k.usage.daily_usd ?? 0);
+  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+  const over = limit > 0 && used >= limit;
   const models = k.models ?? [];
   // Deduplicate by alias name for display: a multi-target alias resolves
   // to multiple ModelRules sharing one alias, but the key list should show
@@ -181,16 +208,6 @@ function KeyCard({
     }
   };
 
-  // Click handles tap-to-open. Skipped when the pointer turned into a swipe
-  // (moved.current) or the revoke panel is revealed, so a swipe doesn't also
-  // navigate. Using onClick (instead of navigating from pointerup) is more
-  // reliable on mobile browsers where pointerup can be swallowed by touch
-  // handling.
-  const onClick = () => {
-    if (moved.current || revoking) return;
-    nav(`/keys/${encodeURIComponent(k.id)}/usage`);
-  };
-
   const doRevoke = () => { setDx(0); setRevoking(false); onDelete(k.id); };
 
   return (
@@ -201,54 +218,60 @@ function KeyCard({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      onClick={onClick}
       style={{ transform: `translateX(${dx}px)`, touchAction: "pan-y" }}
     >
-      <div className="kc-revoke" style={{ opacity: revoking || dx < -8 ? 1 : 0, transition: "opacity 150ms" }}
+      <button type="button" className="kc-revoke" disabled={!revoking} style={{ opacity: revoking || dx < -8 ? 1 : 0, transition: "opacity 150ms" }}
            onClick={(e) => { e.stopPropagation(); if (revoking) doRevoke(); }}>
         <span className="revoke-icon">⊘</span>
         <span>{t("keys.mobile.revoke")}</span>
-      </div>
-      <div className="kc-head">
-        <span className="kc-dot" />
-        <span className="kc-name">{k.name || k.id}</span>
-        <span className="kc-chevron">›</span>
-      </div>
-      <div className="kc-preview">{k.key_preview}</div>
-      {limit > 0 && (
-        <>
-          <div className="kc-bar"><span style={{ width: pct + "%" }} /></div>
+      </button>
+      <Link
+        className="kc-open"
+        to={`/keys/${encodeURIComponent(k.id)}/usage`}
+        aria-label={`${k.name || k.id} · ${fixedQuota ? t("keys.quotaFixed") : t("keys.quotaPeriodic")}`}
+        onClick={(e) => {
+          if (moved.current || revoking) e.preventDefault();
+        }}
+      >
+        <div className="kc-head">
+          <span className="kc-dot" aria-hidden="true" />
+          <span className="kc-name">{k.name || k.id}</span>
+          <span className={"kc-quota-mode" + (fixedQuota ? " fixed" : "")}>{fixedQuota ? t("keys.quotaFixed") : t("keys.quotaPeriodic")}</span>
+          <span className="kc-chevron" aria-hidden="true">›</span>
+        </div>
+        <div className="kc-preview">{k.key_preview}</div>
+        {limit > 0 && (
+          <>
+            <div className="kc-bar"><span style={{ width: pct + "%" }} /></div>
+            <div className="kc-meta">
+              <span>{fmtUsd(used)} / {fmtUsd(limit)}</span>
+              <span>{uniqueAliases.length} {t("keys.mobile.modelsSuffix")}</span>
+            </div>
+          </>
+        )}
+        {limit === 0 && (
           <div className="kc-meta">
-            <span>${k.usage.daily_usd.toFixed(2)} / ${limit.toFixed(2)}</span>
+            <span>{fmtUsd(used)} · {t("keys.mobile.noLimit")}</span>
             <span>{uniqueAliases.length} {t("keys.mobile.modelsSuffix")}</span>
           </div>
-        </>
-      )}
-      {limit === 0 && (
-        <div className="kc-meta">
-          <span>${k.usage.daily_usd.toFixed(2)} · {t("keys.mobile.noLimit")}</span>
-          <span>{uniqueAliases.length} {t("keys.mobile.modelsSuffix")}</span>
-        </div>
-      )}
-      {shownChips.length > 0 && (
-        <div className="kc-chips">
-          {shownChips.map((a) => <span key={a} className="chip">{a}</span>)}
-          {moreCount > 0 && <span className="chip more">+{moreCount}</span>}
-        </div>
-      )}
+        )}
+        {shownChips.length > 0 && (
+          <div className="kc-chips">
+            {shownChips.map((a) => <span key={a} className="chip">{a}</span>)}
+            {moreCount > 0 && <span className="chip more">+{moreCount}</span>}
+          </div>
+        )}
+      </Link>
 
       {/* Desktop: hover/focus action row. Not an overlay — sits at the card
        * footer and expands on hover/focus-within so card info stays visible.
        * Hidden on mobile (CSS .kc-actions display:none under 641px). The
        * swipe-to-revoke layer above handles mobile delete. */}
       <div className="kc-actions">
-        <Link to={`/keys/${encodeURIComponent(k.id)}/usage`}>
-          <button className="btn sm" onClick={(e) => e.stopPropagation()}>{t("keys.detail")}</button>
-        </Link>
-        <Link to={`/keys/${encodeURIComponent(k.id)}/edit`}>
-          <button className="btn sm" onClick={(e) => e.stopPropagation()}>{t("keys.edit")}</button>
-        </Link>
+        <Link className="btn sm" to={`/keys/${encodeURIComponent(k.id)}/usage`}>{t("keys.detail")}</Link>
+        <Link className="btn sm" to={`/keys/${encodeURIComponent(k.id)}/edit`}>{t("keys.edit")}</Link>
         {onReset && <button className="btn sm" onClick={(e) => { e.stopPropagation(); onReset(k.id); }}>{t("keys.resetRpm")}</button>}
+        {fixedQuota && onResetQuota && <button className="btn sm" onClick={(e) => { e.stopPropagation(); onResetQuota(k.id); }}>{t("keys.resetQuota")}</button>}
         {onRotate && <button className="btn sm" onClick={(e) => { e.stopPropagation(); onRotate(k.id); }}>{t("keys.rotate")}</button>}
         <button className="btn sm danger" onClick={(e) => { e.stopPropagation(); onDelete(k.id); }}>{t("keys.delete")}</button>
       </div>
@@ -283,15 +306,14 @@ export function MobileTabBar({
   usagePath?: string;
 }) {
   const t = useT();
-  const nav = useNavigate();
   const tab = (id: "keys" | "usage" | "new", label: string, icon: string, target: string) => (
-    <button
+    <Link
       className={"tab" + (active === id ? " active" : "")}
-      onClick={() => nav(target)}
+      to={target}
     >
-      <span className="tab-icon">{icon}</span>
+      <span className="tab-icon" aria-hidden="true">{icon}</span>
       <span>{label}</span>
-    </button>
+    </Link>
   );
   return (
     <nav className={"tabbar" + (showUsage ? "" : " tabbar--no-usage")}>

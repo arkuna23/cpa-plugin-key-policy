@@ -1,8 +1,14 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import type { KeyPublic, ModelRule, AliasMapping } from "../types";
 import ModelPicker from "./ModelPicker";
-import { getPriceTable, lookupPrice, type PriceTable } from "../store/modelPrices";
+import {
+  fillAllRecommendedPrices,
+  getPriceTable,
+  lookupPrice,
+  modelPriceKey as priceKey,
+  type PriceTable,
+} from "../store/modelPrices";
 import { fetchAliases } from "../api/mappings";
 import { formatTierLabel } from "../api/models";
 import { useT } from "../i18n";
@@ -13,6 +19,8 @@ export interface KeyFormValues {
   enabled: boolean;
   rpm: number;
   models: ModelRule[];
+  quota_mode: "fixed" | "periodic";
+  fixed_limit_usd: number;
   daily_limit_usd: number;
   weekly_limit_usd: number;
   // Per-key override for GET /v1/models. CPA cannot filter the model list per
@@ -53,16 +61,6 @@ interface PriceRow {
   per_call_usd: number;
 }
 
-// Price-map key. A model selected under different tiers (codex free vs team)
-// produces two ModelRules with the SAME alias but different groups — pricing
-// must be tracked per (group, alias) so each row keeps its own numbers. The
-// group prefix (lowercased) disambiguates; aliases without a group use the
-// alias alone, preserving the legacy key shape for non-tiered providers.
-function priceKey(m: { alias: string; group?: string }): string {
-  const g = (m.group ?? "").toLowerCase();
-  return (g ? g + "|" : "") + m.alias.toLowerCase();
-}
-
 function parseNum(value: string): number {
   const n = parseFloat(value);
   return Number.isFinite(n) ? n : 0;
@@ -79,11 +77,12 @@ export default function KeyForm({
   dangerLabel,
   onDanger,
 }: Props) {
-  const nav = useNavigate();
   const [id, setId] = useState(initial?.id ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [rpm, setRpm] = useState(initial?.rpm ?? 0);
+  const [quotaMode, setQuotaMode] = useState<"fixed" | "periodic">(initial?.quota_mode === "fixed" ? "fixed" : "periodic");
+  const [fixedLimit, setFixedLimit] = useState(initial?.fixed_limit_usd ?? 0);
   const [dailyLimit, setDailyLimit] = useState(initial?.daily_limit_usd ?? 0);
   const [weeklyLimit, setWeeklyLimit] = useState(initial?.weekly_limit_usd ?? 0);
   const [allowModels, setAllowModels] = useState<boolean>(initial?.allow_models_endpoint ?? false);
@@ -107,6 +106,8 @@ export default function KeyForm({
   const [busy, setBusy] = useState(false);
   const [localErr, setLocalErr] = useState("");
   const [expandedPrice, setExpandedPrice] = useState<Record<string, boolean>>({});
+  const [priceLoading, setPriceLoading] = useState(true);
+  const [priceFillFeedback, setPriceFillFeedback] = useState("");
 
   // Global alias table (fetched once on mount). Used by the "已有别名" section
   // so the user can quickly include an alias's targets instead of picking
@@ -193,7 +194,10 @@ export default function KeyForm({
   useEffect(() => {
     let alive = true;
     void getPriceTable().then((t) => {
-      if (alive) setPriceTable(t);
+      if (alive) {
+        setPriceTable(t);
+        setPriceLoading(false);
+      }
     });
     return () => {
       alive = false;
@@ -255,6 +259,24 @@ export default function KeyForm({
     }));
   };
 
+  const fillAllPrices = async () => {
+    setPriceFillFeedback("");
+    let table = priceTable;
+    if (!table) {
+      setPriceLoading(true);
+      table = await getPriceTable();
+      setPriceLoading(false);
+      if (table) setPriceTable(table);
+    }
+    if (!table) {
+      setPriceFillFeedback(t("keyForm.fillAllPricesUnavailable"));
+      return;
+    }
+    const result = fillAllRecommendedPrices(models, prices, table);
+    setPrices(result.prices);
+    setPriceFillFeedback(t("keyForm.fillAllPricesResult", { updated: result.updated, skipped: result.skipped }));
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocalErr("");
@@ -282,6 +304,8 @@ export default function KeyForm({
         enabled,
         rpm,
         models: pricedModels,
+        quota_mode: quotaMode,
+        fixed_limit_usd: fixedLimit,
         daily_limit_usd: dailyLimit,
         weekly_limit_usd: weeklyLimit,
         allow_models_endpoint: allowModels,
@@ -352,6 +376,9 @@ export default function KeyForm({
                 type="number"
                 min={0}
                 step="0.0001"
+                name={`prices.${key}.per_call_usd`}
+                autoComplete="off"
+                aria-label={`${m.alias} ${t("keyForm.colPerCall")}`}
                 value={row.per_call_usd}
                 onChange={(e) => setPrice(m, "per_call_usd", e.target.value)}
               />
@@ -365,6 +392,9 @@ export default function KeyForm({
                   type="number"
                   min={0}
                   step="0.01"
+                  name={`prices.${key}.input_price_per_million`}
+                  autoComplete="off"
+                  aria-label={`${m.alias} ${t("keyForm.colInput")}`}
                   value={row.input_price_per_million}
                   onChange={(e) => setPrice(m, "input_price_per_million", e.target.value)}
                 />
@@ -376,6 +406,9 @@ export default function KeyForm({
                   type="number"
                   min={0}
                   step="0.01"
+                  name={`prices.${key}.output_price_per_million`}
+                  autoComplete="off"
+                  aria-label={`${m.alias} ${t("keyForm.colOutput")}`}
                   value={row.output_price_per_million}
                   onChange={(e) => setPrice(m, "output_price_per_million", e.target.value)}
                 />
@@ -387,6 +420,9 @@ export default function KeyForm({
                   type="number"
                   min={0}
                   step="0.01"
+                  name={`prices.${key}.cache_read_price_per_million`}
+                  autoComplete="off"
+                  aria-label={`${m.alias} ${t("keyForm.colCacheRead")}`}
                   value={row.cache_read_price_per_million}
                   onChange={(e) => setPrice(m, "cache_read_price_per_million", e.target.value)}
                 />
@@ -437,6 +473,9 @@ export default function KeyForm({
                   type="number"
                   min={0}
                   step="0.0001"
+                  name={`prices.${key}.per_call_usd`}
+                  autoComplete="off"
+                  aria-label={`${m.alias} ${t("keyForm.colPerCall")}`}
                   value={row.per_call_usd}
                   onChange={(e) => setPrice(m, "per_call_usd", e.target.value)}
                 />
@@ -450,6 +489,9 @@ export default function KeyForm({
                   type="number"
                   min={0}
                   step="0.01"
+                  name={`prices.${key}.input_price_per_million`}
+                  autoComplete="off"
+                  aria-label={`${m.alias} ${t("keyForm.colInput")}`}
                   value={row.input_price_per_million}
                   onChange={(e) => setPrice(m, "input_price_per_million", e.target.value)}
                 />
@@ -460,6 +502,9 @@ export default function KeyForm({
                   type="number"
                   min={0}
                   step="0.01"
+                  name={`prices.${key}.output_price_per_million`}
+                  autoComplete="off"
+                  aria-label={`${m.alias} ${t("keyForm.colOutput")}`}
                   value={row.output_price_per_million}
                   onChange={(e) => setPrice(m, "output_price_per_million", e.target.value)}
                 />
@@ -470,6 +515,9 @@ export default function KeyForm({
                   type="number"
                   min={0}
                   step="0.01"
+                  name={`prices.${key}.cache_read_price_per_million`}
+                  autoComplete="off"
+                  aria-label={`${m.alias} ${t("keyForm.colCacheRead")}`}
                   value={row.cache_read_price_per_million}
                   onChange={(e) => setPrice(m, "cache_read_price_per_million", e.target.value)}
                 />
@@ -514,6 +562,86 @@ export default function KeyForm({
     </section>
   );
 
+  const renderQuotaFields = () => (
+    <>
+      <div className="form-row quota-mode-field">
+        <label>{t("keyForm.quotaModeLabel")}</label>
+        <div className="seg quota-mode-seg" role="group" aria-label={t("keyForm.quotaModeLabel")}>
+          <button
+            type="button"
+            className={"seg-btn" + (quotaMode === "fixed" ? " active" : "")}
+            aria-pressed={quotaMode === "fixed"}
+            onClick={() => setQuotaMode("fixed")}
+          >
+            {t("keyForm.quotaFixed")}
+          </button>
+          <button
+            type="button"
+            className={"seg-btn" + (quotaMode === "periodic" ? " active" : "")}
+            aria-pressed={quotaMode === "periodic"}
+            onClick={() => setQuotaMode("periodic")}
+          >
+            {t("keyForm.quotaPeriodic")}
+          </button>
+        </div>
+        <p className="muted kf-hint">
+          {t(quotaMode === "fixed" ? "keyForm.quotaFixedHint" : "keyForm.quotaPeriodicHint")}
+        </p>
+      </div>
+      {quotaMode === "fixed" ? (
+        <div className="form-row">
+          <label>{t("keyForm.fixedLimitLabel")}</label>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            step="0.01"
+            name="fixed_limit_usd"
+            autoComplete="off"
+            aria-label={t("keyForm.fixedLimitLabel")}
+            value={fixedLimit}
+            onChange={(e) => setFixedLimit(parseNum(e.target.value))}
+          />
+        </div>
+      ) : (
+        <div className="row2 quota-periodic-fields">
+          <div className="form-row">
+            <label>{t("keyForm.dailyLimitLabel")}</label>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              step="0.01"
+              name="daily_limit_usd"
+              autoComplete="off"
+              aria-label={t("keyForm.dailyLimitLabel")}
+              value={dailyLimit}
+              onChange={(e) => setDailyLimit(parseNum(e.target.value))}
+            />
+          </div>
+          <div className="form-row">
+            <label>{t("keyForm.weeklyLimitLabel")}</label>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              step="0.01"
+              name="weekly_limit_usd"
+              autoComplete="off"
+              aria-label={t("keyForm.weeklyLimitLabel")}
+              value={weeklyLimit}
+              onChange={(e) => setWeeklyLimit(parseNum(e.target.value))}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const uniquePriceModels = models.filter(
+    (model, index, all) => all.findIndex((candidate) => priceKey(candidate) === priceKey(model)) === index,
+  );
+
   return (
     <form className="card key-form" onSubmit={submit}>
       <div className="mobile-only kf-sections">
@@ -523,17 +651,23 @@ export default function KeyForm({
               <label>{t("keyForm.idLabel")}</label>
               <input
                 className={"input" + (idReadOnly ? " mono" : "")}
+                name="key_id"
+                autoComplete="off"
+                spellCheck={false}
+                aria-label={t("keyForm.idLabel")}
                 value={id}
                 onChange={(e) => setId(e.target.value)}
                 readOnly={idReadOnly}
                 placeholder={t("keyForm.idPlaceholder")}
-                autoFocus={!idReadOnly}
               />
             </div>
             <div className="form-row">
               <label>{t("keyForm.nameLabel")}</label>
               <input
                 className="input"
+                name="key_name"
+                autoComplete="off"
+                aria-label={t("keyForm.nameLabel")}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t("keyForm.namePlaceholder")}
@@ -541,7 +675,7 @@ export default function KeyForm({
             </div>
             <div className="form-row kf-switch-row">
               <label className="switch">
-                <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+                <input name="enabled" type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
                 <span className="track"><span className="thumb" /></span>
                 <span>{t("keyForm.enableKey")}</span>
               </label>
@@ -552,6 +686,9 @@ export default function KeyForm({
                 className="input"
                 type="number"
                 min={0}
+                name="rpm"
+                autoComplete="off"
+                aria-label={t("keyForm.rpmLabel")}
                 value={rpm}
                 onChange={(e) => setRpm(parseInt(e.target.value || "0", 10) || 0)}
               />
@@ -559,35 +696,12 @@ export default function KeyForm({
           </>
         ))}
         {section(t("keyForm.mobile.sectionLimits"), (
-          <>
-            <div className="form-row">
-              <label>{t("keyForm.dailyLimitLabel")}</label>
-              <input
-                className="input"
-                type="number"
-                min={0}
-                step="0.01"
-                value={dailyLimit}
-                onChange={(e) => setDailyLimit(parseNum(e.target.value))}
-              />
-            </div>
-            <div className="form-row">
-              <label>{t("keyForm.weeklyLimitLabel")}</label>
-              <input
-                className="input"
-                type="number"
-                min={0}
-                step="0.01"
-                value={weeklyLimit}
-                onChange={(e) => setWeeklyLimit(parseNum(e.target.value))}
-              />
-            </div>
-          </>
+          renderQuotaFields()
         ))}
         {section(t("keyForm.mobile.sectionAccess"), (
           <>
             <label className="switch kf-access-switch" title={t("keyForm.allowModelsTitle")}>
-              <input type="checkbox" checked={allowModels} onChange={(e) => setAllowModels(e.target.checked)} />
+              <input name="allow_models_endpoint" type="checkbox" checked={allowModels} onChange={(e) => setAllowModels(e.target.checked)} />
               <span className="track"><span className="thumb" /></span>
               <span>{t("keyForm.allowModelsLabel")}</span>
             </label>
@@ -614,7 +728,7 @@ export default function KeyForm({
             {pickPath ? (
               <div className="model-chips-box">
                 {models.length === 0 && <span className="mc-empty">{t("keyForm.modelsEmpty")}</span>}
-                {models.map((m) => (
+                {uniquePriceModels.map((m) => (
                   <span key={priceKey(m)} className="mc-chip">
                     {m.alias}{m.group ? " · " + formatTierLabel(t, m.group) : ""}
                     <button type="button" className="mc-x" onClick={() => {
@@ -622,17 +736,31 @@ export default function KeyForm({
                     }} aria-label={t("keyForm.removeModel")}>×</button>
                   </span>
                 ))}
-                <button type="button" className="mc-add" onClick={() => nav(pickPath, { state: { models } })}>
+                <Link className="mc-add" to={pickPath} state={{ models }}>
                   + {t("keyForm.addModel")}
-                </button>
+                </Link>
               </div>
             ) : (
               <ModelPicker initial={initial?.models} onChange={handleModelsChange} />
             )}
           </div>
           {models.length > 0 && (
+            <div className="kf-price-tools">
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => void fillAllPrices()}
+                disabled={priceLoading}
+                title={t("keyForm.fillAllPricesTitle")}
+              >
+                {priceLoading ? t("keyForm.fillAllPricesLoading") : t("keyForm.fillAllPrices")}
+              </button>
+              {priceFillFeedback && <span className="muted" role="status" aria-live="polite">{priceFillFeedback}</span>}
+            </div>
+          )}
+          {models.length > 0 && (
             <div className="kf-model-list">
-              {models.map((m) => {
+              {uniquePriceModels.map((m) => {
                 const key = priceKey(m);
                 const row = prices[key];
                 const perCall = row?.billing_mode === "per_call";
@@ -655,7 +783,7 @@ export default function KeyForm({
                       <span className={"mm-badge" + (perCall ? " per_call" : "")}>
                         {perCall ? t("keyForm.billingPerCall") : t("keyForm.billingTokens")}
                       </span>
-                      <span className="kf-chevron">{open ? "▾" : "▸"}</span>
+                      <span className="kf-chevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
                     </button>
                     {open && renderPriceEditor(m, "mobile")}
                   </div>
@@ -673,17 +801,23 @@ export default function KeyForm({
           <label>{t("keyForm.idLabel")}</label>
           <input
             className="input"
+            name="key_id"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label={t("keyForm.idLabel")}
             value={id}
             onChange={(e) => setId(e.target.value)}
             readOnly={idReadOnly}
             placeholder={t("keyForm.idPlaceholder")}
-            autoFocus={!idReadOnly}
           />
         </div>
         <div className="form-row">
           <label>{t("keyForm.nameLabel")}</label>
           <input
             className="input"
+            name="key_name"
+            autoComplete="off"
+            aria-label={t("keyForm.nameLabel")}
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t("keyForm.namePlaceholder")}
@@ -697,6 +831,9 @@ export default function KeyForm({
             className="input"
             type="number"
             min={0}
+            name="rpm"
+            autoComplete="off"
+            aria-label={t("keyForm.rpmLabel")}
             value={rpm}
             onChange={(e) => setRpm(parseInt(e.target.value || "0", 10) || 0)}
           />
@@ -706,6 +843,7 @@ export default function KeyForm({
           <label className="switch">
             <input
               type="checkbox"
+              name="enabled"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
             />
@@ -715,35 +853,13 @@ export default function KeyForm({
         </div>
       </div>
 
-      <div className="row2">
-        <div className="form-row">
-          <label>{t("keyForm.dailyLimitLabel")}</label>
-          <input
-            className="input"
-            type="number"
-            min={0}
-            step="0.01"
-            value={dailyLimit}
-            onChange={(e) => setDailyLimit(parseNum(e.target.value))}
-          />
-        </div>
-        <div className="form-row">
-          <label>{t("keyForm.weeklyLimitLabel")}</label>
-          <input
-            className="input"
-            type="number"
-            min={0}
-            step="0.01"
-            value={weeklyLimit}
-            onChange={(e) => setWeeklyLimit(parseNum(e.target.value))}
-          />
-        </div>
-      </div>
+      {renderQuotaFields()}
 
       <div className="form-row">
         <label className="switch" title={t("keyForm.allowModelsTitle")}>
           <input
             type="checkbox"
+            name="allow_models_endpoint"
             checked={allowModels}
             onChange={(e) => setAllowModels(e.target.checked)}
           />
@@ -782,7 +898,7 @@ export default function KeyForm({
         {pickPath ? (
           <div className="model-chips-box">
             {models.length === 0 && <span className="mc-empty">{t("keyForm.modelsEmpty")}</span>}
-            {models.map((m) => (
+            {uniquePriceModels.map((m) => (
               <span key={priceKey(m)} className="mc-chip">
                 {m.alias}{m.group ? " · " + m.group : ""}
                 <button type="button" className="mc-x" onClick={() => {
@@ -790,9 +906,9 @@ export default function KeyForm({
                 }} aria-label={t("keyForm.removeModel")}>×</button>
               </span>
             ))}
-            <button type="button" className="mc-add" onClick={() => nav(pickPath, { state: { models } })}>
+            <Link className="mc-add" to={pickPath} state={{ models }}>
               + {t("keyForm.addModel")}
-            </button>
+            </Link>
           </div>
         ) : (
           <ModelPicker initial={initial?.models} onChange={handleModelsChange} />
@@ -805,7 +921,19 @@ export default function KeyForm({
           (values retained but dormant) and a single $/call input is shown. */}
       {models.length > 0 && (
         <div className="form-row" style={{ marginTop: 8 }}>
-          <label>{t("keyForm.priceLabel")}</label>
+          <div className="kf-price-heading">
+            <label>{t("keyForm.priceLabel")}</label>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => void fillAllPrices()}
+              disabled={priceLoading}
+              title={t("keyForm.fillAllPricesTitle")}
+            >
+              {priceLoading ? t("keyForm.fillAllPricesLoading") : t("keyForm.fillAllPrices")}
+            </button>
+          </div>
+          {priceFillFeedback && <p className="muted kf-price-feedback" role="status" aria-live="polite">{priceFillFeedback}</p>}
           <div className="card table-wrap" style={{ padding: 0 }}>
             <table>
               <thead>
@@ -824,7 +952,7 @@ export default function KeyForm({
                 {/* Per-alias unified pricing: dedupe by priceKey so a
                     multi-target global alias renders ONE unified price row
                     (aggregated provider/group show the targets it covers). */}
-                {models.filter((m, i, arr) => arr.findIndex((x) => priceKey(x) === priceKey(m)) === i).map((m) => renderPriceEditor(m, "table"))}
+                {uniquePriceModels.map((m) => renderPriceEditor(m, "table"))}
               </tbody>
             </table>
           </div>

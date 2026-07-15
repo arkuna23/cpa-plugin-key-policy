@@ -32,8 +32,13 @@
 
 - 允许的 **模型** 和/或 **别名**
 - RPM
-- 每日 / 每周美元上限（可选）
+- 两种互斥配额模式：固定累计美元额度，或每日 / 每周周期额度
 - 是否允许主端口访问 `/v1/models`（见下文）
+
+固定配额不会自动重置，管理员可通过网页或 `POST …/keys/reset-quota`
+清零固定累计值；每日/每周统计不受影响。周期配额保持原有每日 UTC
+重置与 7 天窗口行为。模型价格表支持使用 LiteLLM 社区参考价逐行推荐，
+也可一键覆盖所有能精确匹配的单目标 token 计价行。
 
 ### 别名（全局映射表）
 
@@ -95,6 +100,7 @@ Linux `.so` 需要 cgo：
 ```bash
 make test
 make build-linux          # 先编前端，再编 linux amd64/arm64 .so
+make package-linux-arm64  # 生成符合官方插件商店格式的 ARM64 ZIP + checksums.txt
 # 或
 make web-build
 GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
@@ -103,7 +109,20 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
 
 Windows 上请用 WSL/Linux 编 `.so`。`go test ./...` 可用非 cgo stub，不依赖动态库工具链。
 
-把 `.so` 放进 CPA 的 `plugins.dir`，并在配置里启用插件。
+`make package-linux-arm64` 会生成：
+
+- `dist/cpa-key-policy_0.5.0_linux_arm64.zip`：官方商店 Release 资产格式；ZIP 根目录内是 `cpa-key-policy.so`。
+- `dist/checksums.txt`：供 CLIProxyAPI 安装器校验 ZIP。
+- `dist/cpa-key-policy.so`：用于手动安装的 ARM64 动态库。
+
+### 导入到 CLIProxyAPI
+
+CLIProxyAPI 当前没有上传本地 ZIP 的管理接口。可使用以下两种方式：
+
+1. **插件商店安装**：先把版本为 `v0.5.0` 的 GitHub Release 发布到本仓库，Release 中上传上述 ZIP 和 `checksums.txt`，并把官方 Plugins Store registry 的 `cpa-key-policy` 版本更新为 `0.5.0`。然后在 CLIProxyAPI 管理面板的插件商店中搜索 `CPA Key Policy` 并点击安装。
+2. **手动安装 ARM64 版本**：停止 CLIProxyAPI，把 `dist/cpa-key-policy.so` 复制到 `<plugins.dir>/linux/arm64/cpa-key-policy.so`，加入下方配置后重启。也可以放在 `<plugins.dir>/cpa-key-policy.so`，但按系统/架构分目录更稳妥。
+
+请使用支持动态插件的 CLIProxyAPI 构建；Linux 的 `_no-plugin` 版本无法加载 `.so`。升级已经加载的同版本插件时应先停止或重启 CLIProxyAPI，避免动态库文件被锁定。
 
 ---
 
@@ -161,7 +180,7 @@ VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev
 
 路径为精确匹配。鉴权：CPA 管理 Bearer。
 
-**Key：** `GET/POST/PATCH/DELETE …/keys`，以及 `rotate` / `reset-rpm` / `usage` / `status`  
+**Key：** `GET/POST/PATCH/DELETE …/keys`，以及 `rotate` / `reset-rpm` / `reset-quota` / `usage` / `status`
 
 **别名：** `GET/POST/DELETE …/aliases`  
 
@@ -244,4 +263,3 @@ curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/aliases" \
 go test ./...
 cd web && npm test && npm run build
 ```
-

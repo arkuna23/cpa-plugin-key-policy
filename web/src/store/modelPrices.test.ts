@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   parseLiteLLM,
   lookupPrice,
+  fillAllRecommendedPrices,
+  modelPriceKey,
   getPriceTable,
   _resetPriceCache,
 } from "./modelPrices";
@@ -166,5 +168,64 @@ describe("getPriceTable caching", () => {
     expect(a).not.toBeNull();
     expect(b).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fillAllRecommendedPrices", () => {
+  it("overwrites all token prices for matching single-target rows", () => {
+    const models = [{ alias: "fast", target_model: "gpt-4o", group: "team" }];
+    const key = modelPriceKey(models[0]);
+    const table = parseLiteLLM({
+      "gpt-4o": {
+        input_cost_per_token: 0.0000025,
+        output_cost_per_token: 0.00001,
+      },
+    });
+    const result = fillAllRecommendedPrices(models, {
+      [key]: {
+        input_price_per_million: 99,
+        output_price_per_million: 88,
+        cache_read_price_per_million: 77,
+        billing_mode: "tokens",
+        per_call_usd: 3,
+      },
+    }, table);
+
+    expect(result.updated).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.prices[key]).toEqual({
+      input_price_per_million: 2.5,
+      output_price_per_million: 10,
+      cache_read_price_per_million: 0,
+      billing_mode: "tokens",
+      per_call_usd: 3,
+    });
+  });
+
+  it("skips per-call, missing-price, and multi-target unified rows", () => {
+    const models = [
+      { alias: "call", target_model: "priced" },
+      { alias: "missing", target_model: "not-found" },
+      { alias: "pool", target_model: "priced", group: "team" },
+      { alias: "pool", target_model: "priced-2", group: "team" },
+    ];
+    const prices = Object.fromEntries(
+      ["call", "missing", "team|pool"].map((key) => [key, {
+        input_price_per_million: 1,
+        output_price_per_million: 2,
+        cache_read_price_per_million: 3,
+        billing_mode: key === "call" ? "per_call" as const : "tokens" as const,
+        per_call_usd: 0.5,
+      }]),
+    );
+    const table = parseLiteLLM({
+      priced: { input_cost_per_token: 0.000001, output_cost_per_token: 0.000002 },
+      "priced-2": { input_cost_per_token: 0.000003, output_cost_per_token: 0.000004 },
+    });
+    const result = fillAllRecommendedPrices(models, prices, table);
+
+    expect(result.updated).toBe(0);
+    expect(result.skipped).toBe(3);
+    expect(result.prices).toEqual(prices);
   });
 });

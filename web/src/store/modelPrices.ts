@@ -35,10 +35,72 @@ export interface PriceRow {
   cache_read_price_per_million: number;
 }
 
+export interface EditablePriceRow extends PriceRow {
+  billing_mode: "tokens" | "per_call";
+  per_call_usd: number;
+}
+
+export interface PriceModelRow {
+  alias: string;
+  target_model: string;
+  group?: string;
+}
+
 // Lowercased model name → per-million price row. null entries mark models that
 // exist in the catalog but carry no usable price info (so callers can
 // distinguish "no such model" from "found, but no price" if needed).
 export type PriceTable = Map<string, PriceRow>;
+
+export function modelPriceKey(model: { alias: string; group?: string }): string {
+  const group = (model.group ?? "").toLowerCase();
+  return (group ? group + "|" : "") + model.alias.toLowerCase();
+}
+
+// Replace every eligible price row with its LiteLLM recommendation. A price
+// row is eligible only when it is token-billed and maps to exactly one target
+// model. Multi-target aliases share one price but may point at different
+// models, so choosing a recommendation for them would be ambiguous.
+export function fillAllRecommendedPrices(
+  models: PriceModelRow[],
+  prices: Record<string, EditablePriceRow>,
+  table: PriceTable,
+): { prices: Record<string, EditablePriceRow>; updated: number; skipped: number } {
+  const grouped = new Map<string, PriceModelRow[]>();
+  for (const model of models) {
+    const key = modelPriceKey(model);
+    grouped.set(key, [...(grouped.get(key) ?? []), model]);
+  }
+
+  const next = { ...prices };
+  let updated = 0;
+  let skipped = 0;
+  for (const [key, rows] of grouped) {
+    const current = prices[key] ?? {
+      input_price_per_million: 0,
+      output_price_per_million: 0,
+      cache_read_price_per_million: 0,
+      billing_mode: "tokens" as const,
+      per_call_usd: 0,
+    };
+    if (rows.length !== 1 || current.billing_mode === "per_call") {
+      skipped++;
+      continue;
+    }
+    const recommendation = lookupPrice(table, rows[0].target_model);
+    if (!recommendation) {
+      skipped++;
+      continue;
+    }
+    next[key] = {
+      ...current,
+      input_price_per_million: recommendation.input_price_per_million,
+      output_price_per_million: recommendation.output_price_per_million,
+      cache_read_price_per_million: recommendation.cache_read_price_per_million,
+    };
+    updated++;
+  }
+  return { prices: next, updated, skipped };
+}
 
 interface CacheEnvelope {
   fetchedAt: number;
@@ -117,13 +179,19 @@ function writeCache(table: PriceTable): void {
   }
 }
 
-// In-memory memo so multiple KeyForm mounts in one tab share a single fetch
-// without re-reading sessionStorage on every call.
+// In-memory memo so multiple KeyForm mounts in one tab share both the fetch and
+// parsed table. The LiteLLM catalog is large; reparsing its sessionStorage JSON
+// on every form mount caused avoidable main-thread work.
 let inflight: Promise<PriceTable | null> | null = null;
+let memoryCache: PriceTable | null = null;
 
 export async function getPriceTable(): Promise<PriceTable | null> {
+  if (memoryCache) return memoryCache;
   const cached = readCache();
-  if (cached) return cached;
+  if (cached) {
+    memoryCache = cached;
+    return cached;
+  }
   if (inflight) return inflight;
 
   inflight = (async () => {
@@ -134,6 +202,7 @@ export async function getPriceTable(): Promise<PriceTable | null> {
       if (!json || typeof json !== "object") return null;
       const table = parseLiteLLM(json);
       writeCache(table);
+      memoryCache = table;
       return table;
     } catch {
       return null;
@@ -159,4 +228,5 @@ export function _resetPriceCache(): void {
     /* ignore */
   }
   inflight = null;
+  memoryCache = null;
 }

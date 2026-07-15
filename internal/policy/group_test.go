@@ -148,9 +148,9 @@ func TestAuthenticateAndRouteShareMultiTargetGroup(t *testing.T) {
 		if !dec.Allowed {
 			t.Fatalf("auth %d: expected allowed, got %+v", i, dec)
 		}
-		rule, keyID, ok := store.Route(hdr, nil, "mixed")
-		if !ok || keyID != "k" {
-			t.Fatalf("route %d: expected ok key=k, got ok=%v key=%q", i, ok, keyID)
+		rule, ok := store.RuleFromSelection(dec.KeyID, "mixed", dec.Rule.Provider, dec.Rule.TargetModel, dec.Rule.Group)
+		if !ok || dec.KeyID != "k" {
+			t.Fatalf("route %d: expected selected rule for key=k, got ok=%v key=%q", i, ok, dec.KeyID)
 		}
 		if rule.Group != dec.Rule.Group {
 			t.Fatalf("call %d: auth group %q != route group %q (provider=%s model=%s)",
@@ -209,8 +209,9 @@ func TestAuthenticateAndRoutePriorityKeepsFirstGroup(t *testing.T) {
 	}
 }
 
-// Route-only callers (no prior Authenticate) still resolve multi-target aliases.
-func TestRouteWithoutAuthenticateStillResolves(t *testing.T) {
+// Route-only multi-target callers fail closed because there is no request-scoped
+// auth metadata proving which round-robin target and group were selected.
+func TestRouteWithoutAuthenticateMultiTargetFailsClosed(t *testing.T) {
 	store := NewStore()
 	plain := "route-only-key"
 	hash, err := HashKey(plain)
@@ -236,8 +237,7 @@ func TestRouteWithoutAuthenticateStillResolves(t *testing.T) {
 		t.Fatal(err)
 	}
 	hdr := http.Header{"Authorization": {"Bearer " + plain}}
-	rule, _, ok := store.Route(hdr, nil, "solo")
-	if !ok || rule.Group == "" {
-		t.Fatalf("expected route-only multi-target resolve, got ok=%v rule=%+v", ok, rule)
+	if rule, _, ok := store.Route(hdr, nil, "solo"); ok {
+		t.Fatalf("route-only multi-target must fail closed, got rule=%+v", rule)
 	}
 }

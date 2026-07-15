@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { fetchKeyUsage } from "../api/keys";
+import { fetchKeyUsage, resetQuota } from "../api/keys";
 import type { AliasUsageEntry, KeyUsageResponse, UsageWindow } from "../types";
 import { useT } from "../i18n";
 import { MobileTabBar } from "./KeyList";
@@ -10,8 +10,15 @@ import { MobileTabBar } from "./KeyList";
 // show at once. Mirrors the KeyList usage column's today/this-week framing.
 type Window = "daily" | "weekly";
 
+const usdFormatter = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 function fmtUsd(n: number): string {
-  return "$" + (Number.isFinite(n) ? n.toFixed(2) : "0.00");
+  return usdFormatter.format(Number.isFinite(n) ? n : 0);
 }
 
 // Compact integer formatting with thousands separators. 0 shows as "0".
@@ -49,6 +56,7 @@ export default function KeyUsage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [win, setWin] = useState<Window>("daily");
+  const [quotaResetting, setQuotaResetting] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -79,37 +87,55 @@ export default function KeyUsage() {
   if (error || !data) return <div className="error">{error || t("keyUsage.notFound")}</div>;
 
   const aliases = data.aliases ?? [];
-  const hasUsage = aliases.some((a) => (a.daily.call_count ?? 0) > 0 || (a.weekly.call_count ?? 0) > 0 || (a.daily.total_usd ?? 0) > 0 || (a.weekly.total_usd ?? 0) > 0);
+  const fixedQuota = data.quota_mode === "fixed";
+  const hasUsage = aliases.some((a) => (a.fixed.call_count ?? 0) > 0 || (a.daily.call_count ?? 0) > 0 || (a.weekly.call_count ?? 0) > 0 || (a.fixed.total_usd ?? 0) > 0 || (a.daily.total_usd ?? 0) > 0 || (a.weekly.total_usd ?? 0) > 0);
 
-  const windowOf = (a: AliasUsageEntry): UsageWindow => (win === "daily" ? a.daily : a.weekly);
+  const windowOf = (a: AliasUsageEntry): UsageWindow => fixedQuota ? a.fixed : (win === "daily" ? a.daily : a.weekly);
 
   // Mobile hero totals: sum across aliases for the active window.
   const heroUsd = aliases.reduce((s, a) => s + (windowOf(a).total_usd ?? 0), 0);
   const heroCalls = aliases.reduce((s, a) => s + (windowOf(a).call_count ?? 0), 0);
   const heroInput = aliases.reduce((s, a) => s + (windowOf(a).input_tokens ?? 0), 0);
   const heroOutput = aliases.reduce((s, a) => s + (windowOf(a).output_tokens ?? 0), 0);
-  const heroLimit = win === "daily" ? data.daily_limit_usd : data.weekly_limit_usd;
+  const heroLimit = fixedQuota ? data.fixed_limit_usd : (win === "daily" ? data.daily_limit_usd : data.weekly_limit_usd);
   const heroPct = heroLimit > 0 ? Math.min(100, (heroUsd / heroLimit) * 100) : 0;
   const maxAliasUsd = Math.max(1, ...aliases.map((a) => windowOf(a).total_usd ?? 0));
+  const windowLabel = fixedQuota ? t("keyUsage.tabFixed") : (win === "daily" ? t("keyUsage.mobile.today") : t("keyUsage.mobile.thisWeek"));
+
+  const handleResetQuota = async () => {
+    if (!confirm(t("keys.resetQuotaConfirm", { id: data.key_id }))) return;
+    setQuotaResetting(true);
+    try {
+      await resetQuota(data.key_id);
+      setData(await fetchKeyUsage(data.key_id));
+    } catch (e) {
+      alert((e as Error).message ?? t("keys.resetQuotaFailed"));
+    } finally {
+      setQuotaResetting(false);
+    }
+  };
 
   return (
     <div>
       {/* Header: back · key id (mono) · name · daily/weekly toggle */}
       <div className="keyusage-header">
         <div className="keyusage-idline">
-          <Link to="/keys">
-            <button className="btn sm">{t("keyUsage.back")}</button>
-          </Link>
+          <Link className="btn sm" to="/keys">{t("keyUsage.back")}</Link>
           <span className="mono keyusage-id">{data.key_id}</span>
           <span className="muted">{data.key_name}</span>
           <Link
             to={`/keys/${encodeURIComponent(data.key_id)}/edit`}
-            className="mobile-only keyusage-edit-link"
+            className="btn sm mobile-only keyusage-edit-link"
           >
-            <button type="button" className="btn sm">{t("keys.edit")}</button>
+            {t("keys.edit")}
           </Link>
+          {fixedQuota && (
+            <button type="button" className="btn sm" disabled={quotaResetting} onClick={() => void handleResetQuota()}>
+              {t("keys.resetQuota")}
+            </button>
+          )}
         </div>
-        <div className="seg" role="tablist" aria-label={t("keyUsage.windowToggle")}>
+        {!fixedQuota && <div className="seg" role="tablist" aria-label={t("keyUsage.windowToggle")}>
           <button
             role="tab"
             aria-selected={win === "daily"}
@@ -126,14 +152,14 @@ export default function KeyUsage() {
           >
             {t("keyUsage.tabWeekly")}
           </button>
-        </div>
+        </div>}
       </div>
 
       {/* Desktop: hero summary + per-alias table (unchanged) */}
       <div className="usage-hero-d">
         <div className="uhd-tiles">
           <div className="uhd-tile">
-            <span className="uhd-tk">{win === "daily" ? t("keyUsage.mobile.todaySpend") : t("keyUsage.mobile.weekSpend")}</span>
+            <span className="uhd-tk">{fixedQuota ? t("keyUsage.tabFixed") : (win === "daily" ? t("keyUsage.mobile.todaySpend") : t("keyUsage.mobile.weekSpend"))}</span>
             <span className={"uhd-tv" + (heroLimit > 0 && heroUsd >= heroLimit ? " accent" : "")}>{fmtUsd(heroUsd)}</span>
           </div>
           <div className="uhd-tile">
@@ -211,11 +237,11 @@ export default function KeyUsage() {
       {/* Mobile: hero card + horizontal bar ranking */}
       <div className="mobile-only">
         <div className="usage-hero">
-          <div className="uh-label">{win === "daily" ? t("keyUsage.mobile.today") : t("keyUsage.mobile.thisWeek")}</div>
-          <div className="uh-amount">{fmtUsd(heroUsd)}<span className="uh-unit">USD</span></div>
+          <div className="uh-label">{windowLabel}</div>
+          <div className="uh-amount">{fmtUsd(heroUsd)}</div>
           <div className="uh-row">
             <div className="uh-ring">
-              <svg width="64" height="64" viewBox="0 0 64 64">
+              <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
                 <circle cx="32" cy="32" r="26" fill="none" stroke="var(--muted-bg)" strokeWidth="6" />
                 <circle cx="32" cy="32" r="26" fill="none" stroke="var(--accent)" strokeWidth="6"
                   strokeLinecap="round"

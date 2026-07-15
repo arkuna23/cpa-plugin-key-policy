@@ -23,9 +23,27 @@ func ExtractRequestedModel(path string, query url.Values, body []byte) string {
 }
 
 func extractModelFromJSON(body []byte) string {
-	if len(body) == 0 || !json.Valid(body) {
+	if len(body) == 0 {
 		return ""
 	}
+	// OpenAI-compatible requests put model at the top level. Decode only that
+	// field first: encoding/json validates and scans unknown prompt/message
+	// fields without materializing the entire request into map[string]any. This
+	// removes a body-sized allocation from the authentication hot path.
+	var topLevel struct {
+		Model json.RawMessage `json:"model"`
+	}
+	if err := json.Unmarshal(body, &topLevel); err != nil {
+		return ""
+	}
+	if len(topLevel.Model) > 0 {
+		var model string
+		if err := json.Unmarshal(topLevel.Model, &model); err == nil {
+			return strings.TrimSpace(model)
+		}
+	}
+	// Preserve compatibility with the nested request shapes accepted by older
+	// versions. This slower fallback only runs when no top-level model exists.
 	var payload any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return ""

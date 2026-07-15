@@ -12,12 +12,15 @@ import (
 )
 
 type Store struct {
-	mu        sync.RWMutex
-	enabled   bool
-	statePath string
-	keys      map[string]*KeyConfig
-	limiter   *RateLimiter
-	usage     *usageLedger
+	mu         sync.RWMutex
+	persistMu  sync.Mutex
+	enabled    bool
+	statePath  string
+	keys       map[string]*KeyConfig
+	keysByID   map[string]*KeyConfig
+	keysByHash map[string]*KeyConfig
+	limiter    *RateLimiter
+	usage      *usageLedger
 	// flusher for periodically persisting the usage ledger to the state file.
 	flusher *usageFlusher
 	// aliases is the global alias mapping table from config.yaml. Used to
@@ -28,30 +31,10 @@ type Store struct {
 	// rrCounters tracks round-robin position per alias name (global, shared
 	// across all keys). Reset on Configure/UpsertKey when aliases change.
 	rrCounters map[string]int
-	// pendingPicks remembers the multi-target selection made at Authenticate
-	// so Route (and the group stamped into scheduler metadata) use the same
-	// target for the same request. Without this, round-robin would advance
-	// twice (auth + route) and the scheduler could filter by the wrong group.
-	// Keyed by lower(keyID)+"\0"+lower(alias); FIFO queue per key.
-	pendingPicks map[string][]pendingPick
 	// onClassifyRulesChanged is called when classify rules change, so the
 	// plugin can clear its classify cache. Set by the plugin App.
 	onClassifyRulesChanged func()
 }
-
-// pendingPick is one Authenticate-time target selection waiting for Route.
-type pendingPick struct {
-	rule ModelRule
-	at   time.Time
-}
-
-// pendingPickTTL drops orphaned selections when the host never called Route
-// (e.g. rejected after auth). Long enough for normal request setup, short
-// enough not to pin stale groups across unrelated traffic.
-const pendingPickTTL = 30 * time.Second
-
-// pendingPickMaxQueue caps how many unconsumed picks we keep per (key,alias).
-const pendingPickMaxQueue = 32
 
 type AuthDecision struct {
 	Known       bool
@@ -74,12 +57,13 @@ type AuthDecision struct {
 
 func NewStore() *Store {
 	return &Store{
-		enabled:      DefaultConfig().Enabled,
-		keys:         make(map[string]*KeyConfig),
-		limiter:      NewRateLimiter(),
-		usage:        newUsageLedger(time.Now),
-		rrCounters:   make(map[string]int),
-		pendingPicks: make(map[string][]pendingPick),
+		enabled:    DefaultConfig().Enabled,
+		keys:       make(map[string]*KeyConfig),
+		keysByID:   make(map[string]*KeyConfig),
+		keysByHash: make(map[string]*KeyConfig),
+		limiter:    NewRateLimiter(),
+		usage:      newUsageLedger(time.Now),
+		rrCounters: make(map[string]int),
 	}
 }
 
@@ -201,6 +185,7 @@ func (s *Store) Configure(cfg Config) error {
 	}
 	s.classifyRules = cfg.ClassifyRules
 	s.keys = next
+	s.rebuildKeyIndexesLocked()
 	if s.limiter == nil {
 		s.limiter = NewRateLimiter()
 	}
@@ -222,7 +207,7 @@ func (s *Store) Configure(cfg Config) error {
 		baseUsage := s.usageSnapshotLocked()
 		baseAliases := s.aliasesSnapshotLocked()
 		baseRules := s.classifyRulesSnapshotLocked()
-		if errSave := SaveState(statePath, baseKeys, baseUsage, baseAliases, baseRules); errSave != nil {
+		if errSave := s.saveState(statePath, baseKeys, baseUsage, baseAliases, baseRules); errSave != nil {
 			return fmt.Errorf("seed state: %w", errSave)
 		}
 	}
@@ -305,13 +290,6 @@ func (s *Store) Authenticate(method, path string, headers http.Header, query map
 	decision.Allowed = true
 	decision.Reason = "allowed"
 
-	// Remember this request's selected target so Route reuses it (same group /
-	// provider / model). Only stash when the request is actually allowed — a
-	// rate/cost-limited request never reaches model.route.
-	if requested != "" {
-		s.rememberPick(key.ID, requested, decision.Rule)
-	}
-
 	// Per-call image/video pre-charge workaround. CPA's XAI executor does not
 	// emit usage records for /v1/images/* and /v1/videos/* (executeImages and
 	// executeVideos lack a UsageReporter), so usage.handle never fires and the
@@ -345,13 +323,7 @@ func (s *Store) Route(headers http.Header, query map[string][]string, requested 
 	if key == nil || !key.Enabled {
 		return ModelRule{}, "", false
 	}
-	// Prefer the selection Authenticate already made for this request so the
-	// routed provider/model and the group stamped into scheduler metadata stay
-	// aligned (critical for multi-target aliases with different groups).
-	if rule, ok := s.takePick(key.ID, requested); ok {
-		return rule, key.ID, true
-	}
-	rule, ok := s.resolveRuleForAlias(key, requested)
+	rule, ok := s.resolveRuleWithoutMetadata(key, requested)
 	if !ok {
 		return ModelRule{}, key.ID, false
 	}
@@ -394,75 +366,44 @@ func (s *Store) resolveRuleForAlias(key *KeyConfig, requested string) (ModelRule
 	return matches[idx], true
 }
 
-func pendingPickKey(keyID, alias string) string {
-	return strings.ToLower(strings.TrimSpace(keyID)) + "\x00" + strings.ToLower(strings.TrimSpace(alias))
-}
-
-// rememberPick stores Authenticate's selected rule for a later Route call.
-func (s *Store) rememberPick(keyID, alias string, rule ModelRule) {
-	if strings.TrimSpace(keyID) == "" || strings.TrimSpace(alias) == "" {
-		return
+// resolveRuleWithoutMetadata is the compatibility path for hosts/callers that
+// invoke model.route without forwarding frontend-auth metadata. A single
+// target (or priority mapping) is deterministic and safe. Round-robin aliases
+// with multiple targets must fail closed: selecting again could disagree with
+// the group already stamped during authentication and break credential
+// isolation under concurrency.
+func (s *Store) resolveRuleWithoutMetadata(key *KeyConfig, requested string) (ModelRule, bool) {
+	var matches []ModelRule
+	for _, rule := range key.Models {
+		if strings.EqualFold(rule.Alias, requested) {
+			matches = append(matches, rule)
+		}
 	}
-	k := pendingPickKey(keyID, alias)
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.pendingPicks == nil {
-		s.pendingPicks = make(map[string][]pendingPick)
-	}
-	q := s.prunePendingLocked(s.pendingPicks[k], now)
-	q = append(q, pendingPick{rule: rule, at: now})
-	if len(q) > pendingPickMaxQueue {
-		q = q[len(q)-pendingPickMaxQueue:]
-	}
-	s.pendingPicks[k] = q
-}
-
-// takePick consumes the oldest non-expired selection for this key+alias.
-// Returns false when nothing is pending (Route-only callers / tests).
-func (s *Store) takePick(keyID, alias string) (ModelRule, bool) {
-	if strings.TrimSpace(keyID) == "" || strings.TrimSpace(alias) == "" {
+	if len(matches) == 0 {
 		return ModelRule{}, false
 	}
-	k := pendingPickKey(keyID, alias)
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	q := s.prunePendingLocked(s.pendingPicks[k], now)
-	if len(q) == 0 {
-		delete(s.pendingPicks, k)
-		return ModelRule{}, false
+	if len(matches) == 1 {
+		return matches[0], true
 	}
-	pick := q[0]
-	q = q[1:]
-	if len(q) == 0 {
-		delete(s.pendingPicks, k)
-	} else {
-		s.pendingPicks[k] = q
+	s.mu.RLock()
+	alias := s.aliases[strings.ToLower(strings.TrimSpace(requested))]
+	priority := alias != nil && strings.EqualFold(alias.Dispatch, "priority")
+	s.mu.RUnlock()
+	if priority {
+		return matches[0], true
 	}
-	return pick.rule, true
-}
-
-// prunePendingLocked drops expired entries. Caller must hold s.mu.
-func (s *Store) prunePendingLocked(q []pendingPick, now time.Time) []pendingPick {
-	if len(q) == 0 {
-		return q
-	}
-	i := 0
-	for i < len(q) && now.Sub(q[i].at) > pendingPickTTL {
-		i++
-	}
-	if i == 0 {
-		return q
-	}
-	if i >= len(q) {
-		return nil
-	}
-	return q[i:]
+	return ModelRule{}, false
 }
 
 func (s *Store) ResponseAlias(headers http.Header, query map[string][]string, requested string) (string, bool) {
-	rule, _, ok := s.Route(headers, query, requested)
+	if !s.Enabled() {
+		return "", false
+	}
+	key := s.findBySecret(ExtractAPIKey(headers, query))
+	if key == nil || !key.Enabled {
+		return "", false
+	}
+	rule, ok := key.ModelForAlias(requested)
 	if !ok {
 		return "", false
 	}
@@ -504,7 +445,7 @@ func (s *Store) RecordResponseCost(headers http.Header, query map[string][]strin
 		// input tokens for hit-rate denominator parity (treat all prompt tokens
 		// as non-cache input on this path, since we can't tell otherwise).
 		// callCount=1: this was a successful, token-billed request.
-		s.usage.RecordCost(key.ID, alias, cost, 0, 0, int64(usage.PromptTokens), int64(usage.CompletionTokens), 1)
+		s.usage.RecordCost(key.ID, alias, cost, 0, 0, int64(usage.PromptTokens), int64(usage.CompletionTokens), 1, key.QuotaMode == QuotaModeFixed)
 	}
 	return cost
 }
@@ -569,7 +510,7 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail
 		}
 		if s.usage != nil {
 			// callCount=1 regardless of cost (even free calls count toward volume).
-			s.usage.RecordCost(key.ID, resolved, cost, 0, 0, 0, 0, 1)
+			s.usage.RecordCost(key.ID, resolved, cost, 0, 0, 0, 0, 1, key.QuotaMode == QuotaModeFixed)
 		}
 		return cost
 	}
@@ -617,7 +558,7 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail
 		// reports usage volume and hit-rate; USD stays 0. Previously `cost > 0`
 		// dropped free-but-priced requests entirely, hiding their volume.
 		// callCount=1: this was a successful, token-billed request.
-		s.usage.RecordCost(key.ID, resolved, cost, cacheCost, cacheReadTokens, nonCacheInput, int64(detail.OutputTokens), 1)
+		s.usage.RecordCost(key.ID, resolved, cost, cacheCost, cacheReadTokens, nonCacheInput, int64(detail.OutputTokens), 1, key.QuotaMode == QuotaModeFixed)
 	}
 	return cost
 }
@@ -626,9 +567,34 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model string, failed bool, detail
 // (for the keys-list management API).
 func (s *Store) UsageSummaryFor(key KeyConfig) UsageSummary {
 	if s.usage == nil {
-		return UsageSummary{DailyLimitUSD: key.DailyLimitUSD, WeeklyLimitUSD: key.WeeklyLimitUSD}
+		return UsageSummary{FixedLimitUSD: key.FixedLimitUSD, DailyLimitUSD: key.DailyLimitUSD, WeeklyLimitUSD: key.WeeklyLimitUSD}
 	}
 	return s.usage.Summary(key)
+}
+
+// ResetFixedQuota clears only a key's cumulative fixed-quota usage and
+// persists the reset before returning. Daily/weekly usage and configuration
+// remain unchanged.
+func (s *Store) ResetFixedQuota(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("id is required")
+	}
+	key := s.findByID(id)
+	if key == nil {
+		return ErrUnknownKey
+	}
+	if s.usage != nil {
+		s.usage.resetFixedUsage(key.ID)
+	}
+	s.mu.RLock()
+	keys := s.keysSnapshotLocked()
+	usage := s.usageSnapshotLocked()
+	aliases := s.aliasesSnapshotLocked()
+	rules := s.classifyRulesSnapshotLocked()
+	path := s.statePath
+	s.mu.RUnlock()
+	return s.saveState(path, keys, usage, aliases, rules)
 }
 
 // ResetUsage clears in-memory usage for a key (manual quota unlock).
@@ -675,16 +641,19 @@ func (s *Store) findBySecret(raw string) *KeyConfig {
 	if raw == "" {
 		return nil
 	}
+	hash, err := HashKey(raw)
+	if err != nil {
+		return nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, key := range s.keys {
-		if MatchHash(raw, key.KeyHash) {
-			copy := *key
-			copy.Models = append([]ModelRule(nil), key.Models...)
-			return &copy
-		}
+	key := s.keysByHash[hash]
+	if key == nil {
+		return nil
 	}
-	return nil
+	copy := *key
+	copy.Models = append([]ModelRule(nil), key.Models...)
+	return &copy
 }
 
 // findByID resolves a key config by its ID. The host's usage.handle call does
@@ -700,14 +669,48 @@ func (s *Store) findByID(id string) *KeyConfig {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, key := range s.keys {
-		if strings.EqualFold(key.ID, id) {
-			copy := *key
-			copy.Models = append([]ModelRule(nil), key.Models...)
-			return &copy
+	key := s.keysByID[strings.ToLower(id)]
+	if key == nil {
+		return nil
+	}
+	copy := *key
+	copy.Models = append([]ModelRule(nil), key.Models...)
+	return &copy
+}
+
+// RuleFromSelection validates request-scoped auth metadata against the current
+// key policy and returns the canonical in-memory rule. This prevents stale or
+// forged metadata from routing to a target the key no longer owns.
+func (s *Store) RuleFromSelection(keyID, requested, provider, targetModel, group string) (ModelRule, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key := s.keysByID[strings.ToLower(strings.TrimSpace(keyID))]
+	if key == nil || !key.Enabled {
+		return ModelRule{}, false
+	}
+	for _, rule := range key.Models {
+		if strings.EqualFold(rule.Alias, requested) &&
+			strings.EqualFold(rule.Provider, provider) &&
+			strings.EqualFold(rule.TargetModel, targetModel) &&
+			strings.EqualFold(rule.Group, group) {
+			return rule, true
 		}
 	}
-	return nil
+	return ModelRule{}, false
+}
+
+// rebuildKeyIndexesLocked rebuilds the O(1) lookup tables used on every
+// request. Key mutations are rare management operations, so rebuilding here is
+// cheaper and less error-prone than scanning all keys in the hot path.
+func (s *Store) rebuildKeyIndexesLocked() {
+	s.keysByID = make(map[string]*KeyConfig, len(s.keys))
+	s.keysByHash = make(map[string]*KeyConfig, len(s.keys))
+	for _, key := range s.keys {
+		s.keysByID[strings.ToLower(strings.TrimSpace(key.ID))] = key
+		if hash := strings.TrimSpace(key.KeyHash); hash != "" {
+			s.keysByHash[hash] = key
+		}
+	}
 }
 
 func (k *KeyConfig) ModelForAlias(alias string) (ModelRule, bool) {
@@ -862,6 +865,7 @@ func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
 		key.Models = resolveAliasRefsToModels(key.Aliases, aliasLookup)
 	}
 	s.keys[key.ID] = &key
+	s.rebuildKeyIndexesLocked()
 	// Update the store's global alias table if migration added new aliases.
 	s.updateAliasesLocked(cfg.Aliases)
 	keys := s.keysSnapshotLocked()
@@ -869,7 +873,7 @@ func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
 	usage := s.usageSnapshotLocked()
 	s.mu.Unlock()
 	if persist {
-		return SaveState(path, keys, usage, s.aliasesSnapshotLocked(), s.classifyRulesSnapshotLocked())
+		return s.saveState(path, keys, usage, s.aliasesSnapshotLocked(), s.classifyRulesSnapshotLocked())
 	}
 	return nil
 }
@@ -885,6 +889,7 @@ func (s *Store) DeleteKey(id string) error {
 		return ErrUnknownKey
 	}
 	delete(s.keys, id)
+	s.rebuildKeyIndexesLocked()
 	keys := s.keysSnapshotLocked()
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
@@ -895,7 +900,7 @@ func (s *Store) DeleteKey(id string) error {
 	if s.usage != nil {
 		s.usage.resetUsage(id)
 	}
-	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+	return s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
 }
 
 func (s *Store) RotateKey(id string) (string, KeyConfig, error) {
@@ -920,6 +925,7 @@ func (s *Store) RotateKey(id string) (string, KeyConfig, error) {
 	key.KeyHash = hash
 	key.KeyPreview = PreviewKey(plain)
 	key.UpdatedAt = time.Now().UTC()
+	s.rebuildKeyIndexesLocked()
 	copy := *key
 	copy.Models = append([]ModelRule(nil), key.Models...)
 	keys := s.keysSnapshotLocked()
@@ -929,7 +935,7 @@ func (s *Store) RotateKey(id string) (string, KeyConfig, error) {
 	if s.limiter != nil {
 		s.limiter.Reset(id)
 	}
-	if err := SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot()); err != nil {
+	if err := s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot()); err != nil {
 		return "", KeyConfig{}, err
 	}
 	return plain, copy, nil
@@ -977,7 +983,7 @@ func (s *Store) UpsertAlias(alias AliasMapping) error {
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
 	s.mu.Unlock()
-	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+	return s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
 }
 
 // DeleteAlias removes an alias from the global table. Returns an error if any
@@ -1014,7 +1020,7 @@ func (s *Store) DeleteAlias(aliasName string) error {
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
 	s.mu.Unlock()
-	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+	return s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
 }
 
 // --- Classification rule management ---
@@ -1046,7 +1052,7 @@ func (s *Store) UpsertClassifyRule(rule ClassifyRule) error {
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
 	s.mu.Unlock()
-	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+	return s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
 }
 
 // DeleteClassifyRule removes a classification rule by name.
@@ -1069,7 +1075,7 @@ func (s *Store) DeleteClassifyRule(name string) error {
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
 	s.mu.Unlock()
-	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+	return s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
 }
 
 // ReorderClassifyRules reorders the classification rules to match the given
@@ -1100,7 +1106,7 @@ func (s *Store) ReorderClassifyRules(names []string) error {
 	usage := s.usageSnapshotLocked()
 	path := s.statePath
 	s.mu.Unlock()
-	return SaveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
+	return s.saveState(path, keys, usage, s.AliasesSnapshot(), s.ClassifyRulesSnapshot())
 }
 
 // resolveAllModelsLocked re-populates every key's Models from its Aliases
@@ -1167,19 +1173,38 @@ func (s *Store) usageSnapshotLocked() map[string]*UsageState {
 // current key list. Called by the background flusher and at lifecycle points
 // (reconfigure / shutdown).
 func (s *Store) FlushUsage() error {
-	s.mu.Lock()
-	usage := s.usageSnapshotLocked()
+	return s.flushUsage(true)
+}
+
+func (s *Store) flushUsage(force bool) error {
+	s.mu.RLock()
+	ledger := s.usage
 	path := s.statePath
-	s.mu.Unlock()
-	if path == "" {
+	s.mu.RUnlock()
+	if path == "" || ledger == nil {
 		return nil
+	}
+	var usage map[string]*UsageState
+	var version uint64
+	if force {
+		usage, version = ledger.snapshotWithVersion()
+	} else {
+		var dirty bool
+		usage, version, dirty = ledger.snapshotIfDirty()
+		if !dirty {
+			return nil
+		}
 	}
 	// Bug 3 fix: persist only the usage ledger, preserving the key list already
 	// on disk. Keys are mutated synchronously via SaveState in the management
 	// API (UpsertKey/DeleteKey/RotateKey), so the periodic flush must not
 	// overwrite them with an in-memory snapshot that could be stale or
 	// truncated.
-	return SaveUsageOnly(path, usage)
+	if err := s.saveUsageOnly(path, usage); err != nil {
+		return err
+	}
+	ledger.markFlushed(version)
+	return nil
 }
 
 // StartUsageFlusher launches a goroutine that periodically persists the usage
@@ -1193,9 +1218,10 @@ func (s *Store) StartUsageFlusher() func() {
 		return stop
 	}
 	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
 	var stopOnce sync.Once
 	stop := func() { stopOnce.Do(func() { close(stopCh) }) }
-	f := &usageFlusher{stop: stop, stopCh: stopCh, store: s}
+	f := &usageFlusher{stop: stop, stopCh: stopCh, doneCh: doneCh, store: s}
 	s.flusher = f
 	s.mu.Unlock()
 	go f.loop()
@@ -1212,16 +1238,19 @@ func (s *Store) StopUsageFlusher() {
 		return
 	}
 	f.stop()
+	<-f.doneCh
 	_ = s.FlushUsage()
 }
 
 type usageFlusher struct {
 	stop   func()
 	stopCh chan struct{}
+	doneCh chan struct{}
 	store  *Store
 }
 
 func (f *usageFlusher) loop() {
+	defer close(f.doneCh)
 	t := time.NewTicker(usageFlushInterval)
 	defer t.Stop()
 	for {
@@ -1229,35 +1258,42 @@ func (f *usageFlusher) loop() {
 		case <-f.stopCh:
 			return
 		case <-t.C:
-			_ = f.store.FlushUsage()
+			_ = f.store.flushUsage(false)
 		}
 	}
+}
+
+func (s *Store) saveState(path string, keys []KeyConfig, usage map[string]*UsageState, aliases []AliasMapping, rules []ClassifyRule) error {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	return SaveState(path, keys, usage, aliases, rules)
+}
+
+func (s *Store) saveUsageOnly(path string, usage map[string]*UsageState) error {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	return SaveUsageOnly(path, usage)
 }
 
 func (s *Store) Status() map[string]any {
 	s.mu.RLock()
 	enabled := s.enabled
 	statePath := s.statePath
-	keyCount := len(s.keys)
+	keys := s.keysSnapshotLocked()
+	ledger := s.usage
 	s.mu.RUnlock()
+	usage := make(map[string]UsageSummary, len(keys))
+	if ledger != nil {
+		for _, key := range keys {
+			usage[key.ID] = ledger.Summary(key)
+		}
+	}
 	out := map[string]any{
 		"enabled":    enabled,
 		"state_file": statePath,
-		"key_count":  keyCount,
+		"key_count":  len(keys),
 		"rpm_usage":  s.limiter.Snapshot(),
-		"usage":      s.usageUsageLocked(),
-	}
-	return out
-}
-
-// usageUsageLocked returns a summary map of all keys' usage (for status).
-func (s *Store) usageUsageLocked() map[string]UsageSummary {
-	if s.usage == nil {
-		return map[string]UsageSummary{}
-	}
-	out := make(map[string]UsageSummary, len(s.keys))
-	for id, key := range s.keys {
-		out[id] = s.usage.Summary(*key)
+		"usage":      usage,
 	}
 	return out
 }

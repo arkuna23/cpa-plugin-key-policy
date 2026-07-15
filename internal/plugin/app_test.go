@@ -83,6 +83,7 @@ func TestAppAuthenticationAndRoute(t *testing.T) {
 	routeReq, _ := json.Marshal(ModelRouteRequest{
 		RequestedModel: "fast",
 		Headers:        http.Header{"Authorization": {"Bearer " + plain}},
+		Metadata:       metadataAsAny(authResp.Metadata),
 	})
 	raw, err = app.HandleMethod(MethodModelRoute, routeReq)
 	if err != nil {
@@ -121,6 +122,30 @@ func TestAppModelsEndpointDenied(t *testing.T) {
 	}
 	if authResp.Authenticated {
 		t.Fatalf("auth response = %+v, want denied", authResp)
+	}
+}
+
+func TestManagementResetFixedQuotaRoute(t *testing.T) {
+	app, _ := configureTestApp(t)
+	req, _ := json.Marshal(ManagementRequest{
+		Method: http.MethodPost,
+		Path:   "/v0/management/plugins/cpa-key-policy/keys/reset-quota",
+		Body:   []byte(`{"id":"team-a"}`),
+	})
+	raw, err := app.HandleMethod(MethodManagementHandle, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatal(err)
+	}
+	var response ManagementResponse
+	if err := json.Unmarshal(env.Result, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("reset quota status = %d body=%s", response.StatusCode, response.Body)
 	}
 }
 
@@ -644,8 +669,8 @@ func TestManagementKeyUsageEndpoint(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", resp.StatusCode, resp.Body)
 	}
 	var got struct {
-		KeyID   string                     `json:"key_id"`
-		KeyName string                     `json:"key_name"`
+		KeyID   string                   `json:"key_id"`
+		KeyName string                   `json:"key_name"`
 		Aliases []policy.AliasUsageEntry `json:"aliases"`
 	}
 	if err := json.Unmarshal(resp.Body, &got); err != nil {
@@ -734,9 +759,20 @@ keys:
 	// Route should return Handled=true and alternate between the two targets.
 	targetsSeen := map[string]bool{}
 	for i := 0; i < 4; i++ {
+		authReq, _ := json.Marshal(FrontendAuthRequest{
+			Method:  http.MethodPost,
+			Path:    "/v1/chat/completions",
+			Headers: hdr,
+			Body:    []byte(`{"model":"mymulti"}`),
+		})
+		authResp := authResponseFromEnvelope(t, mustHandle(t, app, MethodFrontendAuthAuthenticate, authReq))
+		if !authResp.Authenticated {
+			t.Fatalf("auth call %d was rejected", i)
+		}
 		routeReq, _ := json.Marshal(ModelRouteRequest{
 			RequestedModel: "mymulti",
 			Headers:        hdr,
+			Metadata:       metadataAsAny(authResp.Metadata),
 		})
 		raw, err := app.HandleMethod(MethodModelRoute, routeReq)
 		if err != nil {
@@ -757,6 +793,89 @@ keys:
 	if len(targetsSeen) != 2 {
 		t.Fatalf("expected 2 distinct targets via round-robin, got %d: %v", len(targetsSeen), targetsSeen)
 	}
+}
+
+func TestAppInterleavedMultiTargetRoutesUseOwnAuthMetadata(t *testing.T) {
+	app := NewApp()
+	plain := "cpa_interleaved_target_test"
+	hash := hashForTest(t, plain)
+	if err := app.Store().Configure(policy.Config{
+		Enabled:   true,
+		StateFile: filepath.Join(t.TempDir(), "state.json"),
+		Aliases: []policy.AliasMapping{{
+			Alias:    "mixed",
+			Dispatch: "round-robin",
+			Targets: []policy.AliasTarget{
+				{Provider: "codex", TargetModel: "model-free", Group: "free"},
+				{Provider: "codex", TargetModel: "model-team", Group: "team"},
+			},
+		}},
+		Keys: []policy.KeyConfig{{
+			ID: "key", Enabled: true, KeyHash: hash,
+			Aliases: []policy.KeyAliasRef{{Alias: "mixed"}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hdr := http.Header{"Authorization": {"Bearer " + plain}}
+	auth := func() FrontendAuthResponse {
+		req, _ := json.Marshal(FrontendAuthRequest{
+			Method: http.MethodPost, Path: "/v1/chat/completions", Headers: hdr,
+			Body: []byte(`{"model":"mixed"}`),
+		})
+		return authResponseFromEnvelope(t, mustHandle(t, app, MethodFrontendAuthAuthenticate, req))
+	}
+	first := auth()
+	second := auth()
+	if first.Metadata["target_model"] == second.Metadata["target_model"] {
+		t.Fatalf("round-robin did not select distinct targets: first=%v second=%v", first.Metadata, second.Metadata)
+	}
+
+	route := func(authResp FrontendAuthResponse) ModelRouteResponse {
+		req, _ := json.Marshal(ModelRouteRequest{
+			RequestedModel: "mixed",
+			Headers:        hdr,
+			Metadata:       metadataAsAny(authResp.Metadata),
+		})
+		return routeResponseFromEnvelope(t, mustHandle(t, app, MethodModelRoute, req))
+	}
+	// Route in reverse authentication order. A global FIFO would swap these;
+	// request-scoped metadata must preserve each request's own target.
+	for _, authResp := range []FrontendAuthResponse{second, first} {
+		got := route(authResp)
+		if !got.Handled || got.TargetModel != authResp.Metadata["target_model"] {
+			t.Fatalf("route target = %+v, auth metadata = %+v", got, authResp.Metadata)
+		}
+	}
+
+	tampered := metadataAsAny(first.Metadata)
+	tampered["target_model"] = "not-authorized"
+	req, _ := json.Marshal(ModelRouteRequest{RequestedModel: "mixed", Headers: hdr, Metadata: tampered})
+	if got := routeResponseFromEnvelope(t, mustHandle(t, app, MethodModelRoute, req)); got.Handled {
+		t.Fatalf("tampered request metadata must fail closed: %+v", got)
+	}
+}
+
+func authResponseFromEnvelope(t *testing.T, raw []byte) FrontendAuthResponse {
+	t.Helper()
+	var env Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatal(err)
+	}
+	var resp FrontendAuthResponse
+	if err := json.Unmarshal(env.Result, &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func metadataAsAny(meta map[string]string) map[string]any {
+	out := make(map[string]any, len(meta))
+	for key, value := range meta {
+		out[key] = value
+	}
+	return out
 }
 
 func routeResponseFromEnvelope(t *testing.T, raw []byte) ModelRouteResponse {

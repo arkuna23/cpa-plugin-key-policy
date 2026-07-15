@@ -137,6 +137,13 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 /* Desktop shell: top horizontal nav + centered 1200px content.
  * Mobile keeps the old .header (stacked) via the max-width block. */
 .app { max-width: 1200px; margin: 0 auto; padding: 24px 24px 80px; }
+.skip-link {
+  position: fixed; top: 8px; left: 8px; z-index: 1000;
+  padding: 8px 12px; border-radius: var(--r-md);
+  background: var(--accent); color: var(--on-accent);
+  transform: translateY(-160%); transition: transform var(--t-fast);
+}
+.skip-link:focus { transform: translateY(0); }
 
 /* Top horizontal nav (desktop). Mirrors the Stitch 'Quiet Paper' design:
  * paper bg, bottom border, left = title + base url, right = nav + actions. */
@@ -179,9 +186,11 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
   border-radius: var(--r-md);
   padding: 10px 14px;
   font-weight: 600; font-size: 14px; font-family: inherit;
-  cursor: pointer; transition: all var(--t-fast);
+  cursor: pointer;
+  transition: background-color var(--t-fast), border-color var(--t-fast), color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
   background-color: var(--muted-bg);
   color: var(--text);
+  text-decoration: none;
 }
 .btn:hover { background: var(--panel-2); border-color: var(--border-hover); }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -223,12 +232,22 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
   transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
 .input::placeholder { color: var(--placeholder); }
-.input:focus, select:focus {
+.input:focus-visible, select:focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.quota-mode-seg { margin: 0; width: fit-content; }
+.quota-mode-field .kf-hint { margin-top: 6px; }
+.kf-price-heading, .kf-price-tools {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.kf-price-heading { margin-bottom: 8px; }
+.kf-price-heading > label { margin: 0; }
+.kf-price-feedback { margin: 0 0 8px; font-size: 12px; }
+.kf-price-tools { margin: 0 0 10px; font-size: 12px; }
 
 /* Table — panel Table.module.scss (wrap + border-radius + overflow hidden) */
 .card.table-wrap {
@@ -292,6 +311,8 @@ td .mono, .mono { font-family: "Courier Prime", ui-monospace, Consolas, "Courier
 .modal-overlay {
   position: fixed; inset: 0; background: var(--scrim);
   display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 2000;
+  border: none; width: auto; max-width: none; max-height: none; margin: 0;
+  overscroll-behavior: contain;
 }
 .modal {
   background: var(--panel); border: 1px solid var(--border);
@@ -318,7 +339,7 @@ td .mono, .mono { font-family: "Courier Prime", ui-monospace, Consolas, "Courier
 /* ===== Key detail (KeyUsage) page ===== */
 /* Right-aligned numeric cells: applied via the .num class on th/td. Keeps the
    per-alias usage table's USD / token / call-count columns tidy and scannable. */
-th.num, td.num { text-align: right; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* "strong" = emphasized numeric value (the USD total per alias row). */
 td.strong { font-weight: 600; color: var(--text); }
 
@@ -453,17 +474,19 @@ td.strong { font-weight: 600; color: var(--text); }
   }
   .kf-billing-seg { margin: 12px 0; width: 100%; }
   .kf-billing-seg .seg-btn { flex: 1; }
+  .quota-mode-seg { display: flex; width: 100%; }
+  .quota-mode-seg .seg-btn { flex: 1; }
 
   .keyusage-header .keyusage-idline { width: 100%; }
   .keyusage-edit-link { margin-left: auto; }
 
   .tabbar--no-usage .tab { flex: 1; }
 
-  /* KeyForm submit row: sticky bottom on mobile so the primary action stays
-     reachable without scrolling past all model rows. */
+  /* Keep the KeyForm submit row in normal document flow. A second sticky bar
+     above the fixed tab navigation obscured access/model controls on phones. */
   form.card > .actions {
-    position: sticky; bottom: 64px; z-index: 10;
-    background: var(--panel); padding: 12px 0; margin-top: 12px;
+    position: static;
+    background: var(--panel); padding: 12px 0 0; margin-top: 12px;
     border-top: 1px solid var(--border);
   }
   form.card > .actions .btn.primary { flex: 1; }
@@ -490,7 +513,7 @@ td.strong { font-weight: 600; color: var(--text); }
    block; shown on mobile by the max-width block below. */
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0;
-  height: 56px; z-index: 100;
+  min-height: 56px; padding-bottom: env(safe-area-inset-bottom); z-index: 100;
   background: var(--panel);
   border-top: 1px solid var(--border);
   align-items: stretch;
@@ -500,9 +523,11 @@ td.strong { font-weight: 600; color: var(--text); }
   justify-content: center; gap: 2px;
   background: none; border: none; cursor: pointer;
   color: var(--muted); font-size: 11px; font-weight: 600;
-  font-family: inherit; padding: 0;
+  font-family: inherit; padding: 0; text-decoration: none;
   position: relative;
 }
+.tabbar .tab:hover { color: var(--text); }
+.tabbar .tab:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--accent-ring); }
 .tabbar .tab .tab-icon { font-size: 18px; line-height: 1; }
 .tabbar .tab.active { color: var(--accent); }
 .tabbar .tab.active::before {
@@ -543,6 +568,9 @@ td.strong { font-weight: 600; color: var(--text); }
   overflow: hidden;
 }
 .keycard:hover { border-color: var(--border-hover); }
+.keycard:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.keycard .kc-open { display: block; color: inherit; text-decoration: none; border-radius: var(--r-sm); }
+.keycard .kc-open:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
 .keycard.disabled { opacity: 0.55; }
 .keycard .kc-head {
   display: flex; align-items: center; gap: 8px;
@@ -554,6 +582,14 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .keycard.disabled .kc-dot { background: var(--danger); }
 .keycard .kc-name { font-weight: 600; font-size: 15px; flex: 1; }
+.keycard .kc-quota-mode {
+  flex: none; padding: 2px 7px; border-radius: var(--r-full);
+  border: 1px solid var(--border); background: var(--muted-bg);
+  color: var(--muted); font-size: 10px; font-weight: 700;
+}
+.keycard .kc-quota-mode.fixed {
+  border-color: var(--accent-ring); background: var(--accent-soft); color: var(--accent);
+}
 .keycard .kc-chevron { color: var(--muted); font-size: 16px; }
 .keycard .kc-preview {
   font-family: "Courier Prime", ui-monospace, Consolas, monospace;
@@ -591,6 +627,7 @@ td.strong { font-weight: 600; color: var(--text); }
   align-items: center; justify-content: center; gap: 4px;
   background: var(--danger-soft); color: var(--danger);
   font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  border: none; cursor: pointer; font-family: inherit;
   border-radius: 0 var(--r-md) var(--r-md) 0;
 }
 .keycard .kc-revoke .revoke-icon { font-size: 18px; }
@@ -604,6 +641,7 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 @media (min-width: 641px) {
   .keycard { cursor: default; margin-bottom: 0; }
+  .keycard .kc-revoke { display: none; }
   .keycard:hover { border-color: var(--border-hover); box-shadow: 0 0 0 3px var(--accent-ring); }
   .keycard .kc-actions {
     display: flex; flex-wrap: wrap; gap: 6px;
@@ -669,13 +707,15 @@ td.strong { font-weight: 600; color: var(--text); }
   border: none; background: none; cursor: pointer;
   padding: 6px 16px; border-radius: calc(var(--r-md) - 2px);
   font-size: 13px; font-weight: 600; color: var(--muted); font-family: inherit;
-  transition: all var(--t-fast);
+  transition: background-color var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
 }
+.seg .seg-btn:hover { color: var(--text); }
+.seg .seg-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
 .seg .seg-btn.active { background: var(--accent); color: var(--on-accent); }
 
 /* .bar-rank: horizontal bar ranking (replaces the alias table on mobile). */
 .bar-rank { display: flex; flex-direction: column; gap: 12px; }
-.bar-rank .br-row { cursor: pointer; }
+.bar-rank .br-row { cursor: default; }
 .bar-rank .br-top {
   display: flex; justify-content: space-between; align-items: baseline;
   margin-bottom: 5px;
@@ -841,11 +881,14 @@ td.strong { font-weight: 600; color: var(--text); }
   cursor: pointer; color: var(--muted); font-weight: 700; border: none; background: none; padding: 0; line-height: 1;
 }
 .model-chips-box .mc-chip .mc-x:hover { color: var(--danger); }
+.model-chips-box .mc-chip .mc-x:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
 .model-chips-box .mc-add {
-  font-size: 13px; padding: 6px 12px; border-radius: var(--r-md);
+  display: inline-flex; align-items: center; font-size: 13px; padding: 6px 12px; border-radius: var(--r-md);
   background: var(--muted-bg); color: var(--muted); border: 1px dashed var(--border-strong); cursor: pointer; font-family: inherit;
+  text-decoration: none;
 }
 .model-chips-box .mc-add:hover { border-color: var(--accent); color: var(--accent); }
+.model-chips-box .mc-add:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
 .model-chips-box .mc-empty { font-size: 13px; color: var(--muted); }
 @media (max-width: 640px) {
   .form-page .fp-head h1 { display: none; }
@@ -874,6 +917,7 @@ td.strong { font-weight: 600; color: var(--text); }
   .topnav { display: block; }
   /* KeyUsage header keeps its daily/weekly toggle on desktop. */
   .keyusage-header .seg { display: inline-flex !important; }
+  .quota-mode-seg { display: inline-flex !important; }
 }
 @media (max-width: 640px) {
   .topnav { display: none; }
@@ -950,7 +994,11 @@ td.strong { font-weight: 600; color: var(--text); }
   width: 24px; height: 20px; font-size: 10px; color: var(--muted); cursor: pointer;
 }
 .rule-card-order button:hover { border-color: var(--border-hover); color: var(--text); }
-.rule-card-main { flex: 1; }
+.rule-card-main {
+  flex: 1; min-width: 0; border: none; background: none; color: inherit;
+  padding: 0; text-align: left; cursor: pointer; font: inherit;
+}
+.rule-card-main:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); border-radius: var(--r-sm); }
 .rule-card-name { font-size: 15px; font-weight: 600; }
 .rule-card-sub { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 2px; }
 .rule-card-right { display: flex; align-items: center; gap: 12px; }
@@ -984,7 +1032,12 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .map-form-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .map-form-head h1 { font-size: 18px; font-weight: 700; margin: 0; }
-.map-form-head .back-link { color: var(--accent); font-size: 14px; }
+.map-form-head .back-link {
+  color: var(--accent); font-size: 14px; font-family: inherit;
+  border: none; background: none; padding: 4px; cursor: pointer;
+}
+.map-form-head .back-link:hover { color: var(--accent-2); }
+.map-form-head .back-link:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); border-radius: var(--r-sm); }
 .map-form-row { margin-bottom: 16px; }
 .map-form-row label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
 .map-form-row input, .map-form-row select {
@@ -992,7 +1045,7 @@ td.strong { font-weight: 600; color: var(--text); }
   font-size: 14px; background: var(--card); color: var(--text);
 }
 .map-form-row input.mono { font-family: var(--mono); }
-.map-form-row input:focus, .map-form-row select:focus {
+.map-form-row input:focus-visible, .map-form-row select:focus-visible {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .map-form-radio-group { display: flex; gap: 16px; }
@@ -1070,10 +1123,23 @@ td.strong { font-weight: 600; color: var(--text); }
 .kf-alias-chip {
   font-family: var(--mono); font-size: 12px; padding: 4px 12px;
   border: 1px solid var(--border); border-radius: 999px; background: var(--card);
-  color: var(--muted); cursor: pointer; transition: all .15s;
+  color: var(--muted); cursor: pointer;
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s;
 }
 .kf-alias-chip:hover { border-color: var(--border-hover); color: var(--text); }
+.kf-alias-chip:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
 .kf-alias-chip.selected {
   background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
   font-weight: 600;
+}
+
+button, a { touch-action: manipulation; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

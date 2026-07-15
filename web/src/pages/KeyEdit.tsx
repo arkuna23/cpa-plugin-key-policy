@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { listKeys, patchKey, rotateKey, resetRPM, deleteKey } from "../api/keys";
+import { listKeys, patchKey, rotateKey, resetQuota, resetRPM, deleteKey } from "../api/keys";
 import type { KeyPublic, ModelRule } from "../types";
 import KeyForm from "../components/KeyForm";
 import PlainKeyModal from "../components/PlainKeyModal";
@@ -68,6 +68,14 @@ export default function KeyEdit() {
       alert((e as Error).message ?? t("keys.resetFailed"));
     }
   };
+  const onResetQuota = async () => {
+    if (!confirm(t("keys.resetQuotaConfirm", { id: key.id }))) return;
+    try {
+      await resetQuota(key.id);
+    } catch (e) {
+      alert((e as Error).message ?? t("keys.resetQuotaFailed"));
+    }
+  };
   const onDelete = async () => {
     if (!confirm(t("keys.deleteConfirm", { id: key.id }))) return;
     try {
@@ -84,6 +92,7 @@ export default function KeyEdit() {
         <h1>{t("edit.hTitle")}</h1>
         <div className="fp-actions">
           <button className="btn sm" onClick={onReset}>{t("keys.resetRpm")}</button>
+          {key.quota_mode === "fixed" && <button className="btn sm" onClick={onResetQuota}>{t("keys.resetQuota")}</button>}
           <button className="btn sm" onClick={onRotate}>{t("keys.rotate")}</button>
           <button className="btn sm" onClick={() => nav("/keys")}>{t("keyForm.cancel")}</button>
         </div>
@@ -107,6 +116,8 @@ export default function KeyEdit() {
             enabled: v.enabled,
             rpm: v.rpm,
             models: v.models,
+            quota_mode: v.quota_mode,
+            fixed_limit_usd: v.fixed_limit_usd,
             daily_limit_usd: v.daily_limit_usd,
             weekly_limit_usd: v.weekly_limit_usd,
             allow_models_endpoint: v.allow_models_endpoint,

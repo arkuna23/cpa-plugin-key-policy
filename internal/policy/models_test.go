@@ -2,6 +2,7 @@ package policy
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,36 @@ func TestExtractRequestedModel(t *testing.T) {
 				t.Fatalf("ExtractRequestedModel() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestExtractRequestedModelTopLevelUsesLastDuplicate(t *testing.T) {
+	body := []byte(`{"model":"first","input":"x","model":"last"}`)
+	if got := ExtractRequestedModel("", nil, body); got != "last" {
+		t.Fatalf("ExtractRequestedModel() = %q, want last", got)
+	}
+}
+
+func TestExtractRequestedModelLargeTopLevelAvoidsBodySizedAllocation(t *testing.T) {
+	body := []byte(`{"model":"fast","input":"` + strings.Repeat("x", 1<<20) + `"}`)
+	if got := ExtractRequestedModel("", nil, body); got != "fast" {
+		t.Fatalf("ExtractRequestedModel() = %q, want fast", got)
+	}
+	allocs := testing.AllocsPerRun(10, func() {
+		_ = ExtractRequestedModel("", nil, body)
+	})
+	if allocs > 30 {
+		t.Fatalf("large top-level model extraction allocated %.0f objects, want <= 30", allocs)
+	}
+}
+
+func BenchmarkExtractRequestedModelLargeTopLevel(b *testing.B) {
+	body := []byte(`{"model":"fast","input":"` + strings.Repeat("x", 1<<20) + `"}`)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(body)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ExtractRequestedModel("", nil, body)
 	}
 }
 

@@ -145,7 +145,13 @@ func (a *App) routeModel(raw []byte) ([]byte, error) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
-	rule, keyID, ok := a.store.Route(req.Headers, req.Query, req.RequestedModel)
+	rule, keyID, owned, ok := a.ruleFromMetadata(req.Metadata, req.RequestedModel)
+	if !owned {
+		// Compatibility for older hosts and direct tests. Store.Route only
+		// permits deterministic mappings here; multi-target round-robin fails
+		// closed because selecting again could disagree with auth metadata.
+		rule, keyID, ok = a.store.Route(req.Headers, req.Query, req.RequestedModel)
+	}
 	if !ok {
 		return OKEnvelope(ModelRouteResponse{Handled: false})
 	}
@@ -156,6 +162,46 @@ func (a *App) routeModel(raw []byte) ([]byte, error) {
 		TargetModel: rule.TargetModel,
 		Reason:      "cpa-key-policy:" + keyID,
 	})
+}
+
+// ruleFromMetadata reuses the exact request-scoped target selected during
+// frontend authentication. It replaces the old global FIFO correlation, which
+// could swap targets when two requests for the same key+alias interleaved.
+// owned reports that the metadata belongs to this plugin; invalid owned
+// metadata must fail closed instead of falling back to another selection.
+func (a *App) ruleFromMetadata(meta map[string]any, requested string) (rule policy.ModelRule, keyID string, owned, ok bool) {
+	if !strings.EqualFold(metadataString(meta, "provider"), PluginID) {
+		return policy.ModelRule{}, "", false, false
+	}
+	owned = true
+	keyID = metadataString(meta, "key_id")
+	alias := metadataString(meta, "alias")
+	if alias == "" {
+		alias = metadataString(meta, "requested_model")
+	}
+	if alias == "" {
+		alias = strings.TrimSpace(requested)
+	}
+	if keyID == "" || alias == "" ||
+		(strings.TrimSpace(requested) != "" && !strings.EqualFold(alias, requested)) {
+		return policy.ModelRule{}, keyID, true, false
+	}
+	provider := metadataString(meta, "target_provider")
+	targetModel := metadataString(meta, "target_model")
+	group := metadataString(meta, "group")
+	if provider == "" || targetModel == "" {
+		return policy.ModelRule{}, keyID, true, false
+	}
+	rule, ok = a.store.RuleFromSelection(keyID, alias, provider, targetModel, group)
+	return rule, keyID, true, ok
+}
+
+func metadataString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	value, _ := meta[key].(string)
+	return strings.TrimSpace(value)
 }
 
 // resolveProviderKey maps a ModelRule's provider to the provider key CPA's
@@ -207,9 +253,19 @@ func (a *App) interceptResponse(raw []byte) ([]byte, error) {
 		// Streaming responses are not safe to rewrite (SSE framing) — return as-is.
 		return OKEnvelope(ResponseInterceptResponse{})
 	}
-	alias, ok := a.store.ResponseAlias(req.RequestHeaders, nil, req.RequestedModel)
-	if !ok {
-		return OKEnvelope(ResponseInterceptResponse{})
+	alias := ""
+	if rule, _, owned, selected := a.ruleFromMetadata(req.Metadata, req.RequestedModel); owned {
+		if !selected {
+			return OKEnvelope(ResponseInterceptResponse{})
+		}
+		alias = rule.Alias
+	}
+	if alias == "" {
+		var ok bool
+		alias, ok = a.store.ResponseAlias(req.RequestHeaders, nil, req.RequestedModel)
+		if !ok {
+			return OKEnvelope(ResponseInterceptResponse{})
+		}
 	}
 	body, changed := policy.RewriteTopLevelModel(req.Body, alias)
 	if !changed {
@@ -463,6 +519,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodDelete, Path: base + "/keys", Description: "Delete a downstream CPA key policy by id."},
 			{Method: http.MethodPost, Path: base + "/keys/rotate", Description: "Rotate one downstream CPA key by id."},
 			{Method: http.MethodPost, Path: base + "/keys/reset-rpm", Description: "Reset one downstream CPA key RPM counter by id."},
+			{Method: http.MethodPost, Path: base + "/keys/reset-quota", Description: "Reset one downstream CPA key fixed-quota usage."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Per-alias usage breakdown for one downstream CPA key by id."},
 			{Method: http.MethodGet, Path: base + "/status", Description: "Show cpa-key-policy runtime status."},
 			{Method: http.MethodGet, Path: base + "/aliases", Description: "List the global alias mapping table."},
@@ -510,6 +567,8 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.rotateKey(idFromRequest(req.Query, req.Body)))
 	case req.Method == http.MethodPost && path == base+"/keys/reset-rpm":
 		return OKEnvelope(a.resetRPM(idFromRequest(req.Query, req.Body)))
+	case req.Method == http.MethodPost && path == base+"/keys/reset-quota":
+		return OKEnvelope(a.resetQuota(idFromRequest(req.Query, req.Body)))
 	case req.Method == http.MethodGet && path == base+"/keys/usage":
 		return OKEnvelope(a.keyUsage(idFromRequest(req.Query, req.Body)))
 	case req.Method == http.MethodGet && path == base+"/status":
@@ -538,32 +597,36 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 }
 
 type keyWriteRequest struct {
-	ID                  string              `json:"id"`
-	Name                *string             `json:"name,omitempty"`
-	Enabled             *bool               `json:"enabled,omitempty"`
-	Key                 string              `json:"key,omitempty"`
-	RPM                 *int                `json:"rpm,omitempty"`
+	ID                  string               `json:"id"`
+	Name                *string              `json:"name,omitempty"`
+	Enabled             *bool                `json:"enabled,omitempty"`
+	Key                 string               `json:"key,omitempty"`
+	RPM                 *int                 `json:"rpm,omitempty"`
 	Models              []policy.ModelRule   `json:"models,omitempty"`
 	Aliases             []policy.KeyAliasRef `json:"aliases,omitempty"`
-	DailyLimitUSD       *float64            `json:"daily_limit_usd,omitempty"`
-	WeeklyLimitUSD      *float64            `json:"weekly_limit_usd,omitempty"`
-	AllowModelsEndpoint *bool               `json:"allow_models_endpoint,omitempty"`
+	QuotaMode           *string              `json:"quota_mode,omitempty"`
+	FixedLimitUSD       *float64             `json:"fixed_limit_usd,omitempty"`
+	DailyLimitUSD       *float64             `json:"daily_limit_usd,omitempty"`
+	WeeklyLimitUSD      *float64             `json:"weekly_limit_usd,omitempty"`
+	AllowModelsEndpoint *bool                `json:"allow_models_endpoint,omitempty"`
 }
 
 type publicKey struct {
-	ID                  string              `json:"id"`
-	Name                string              `json:"name"`
-	Enabled             bool                `json:"enabled"`
-	KeyPreview          string              `json:"key_preview"`
-	RPM                 int                 `json:"rpm"`
-	Models              []policy.ModelRule  `json:"models"`
+	ID                  string               `json:"id"`
+	Name                string               `json:"name"`
+	Enabled             bool                 `json:"enabled"`
+	KeyPreview          string               `json:"key_preview"`
+	RPM                 int                  `json:"rpm"`
+	Models              []policy.ModelRule   `json:"models"`
 	Aliases             []policy.KeyAliasRef `json:"aliases"`
-	DailyLimitUSD       float64             `json:"daily_limit_usd"`
-	WeeklyLimitUSD      float64             `json:"weekly_limit_usd"`
-	AllowModelsEndpoint bool                `json:"allow_models_endpoint,omitempty"`
-	Usage               policy.UsageSummary `json:"usage"`
-	CreatedAt           string              `json:"created_at,omitempty"`
-	UpdatedAt           string              `json:"updated_at,omitempty"`
+	QuotaMode           string               `json:"quota_mode"`
+	FixedLimitUSD       float64              `json:"fixed_limit_usd"`
+	DailyLimitUSD       float64              `json:"daily_limit_usd"`
+	WeeklyLimitUSD      float64              `json:"weekly_limit_usd"`
+	AllowModelsEndpoint bool                 `json:"allow_models_endpoint,omitempty"`
+	Usage               policy.UsageSummary  `json:"usage"`
+	CreatedAt           string               `json:"created_at,omitempty"`
+	UpdatedAt           string               `json:"updated_at,omitempty"`
 }
 
 func (a *App) createKey(body []byte) ManagementResponse {
@@ -610,6 +673,8 @@ func (a *App) createKey(body []byte) ManagementResponse {
 		RPM:                 rpm,
 		Models:              req.Models,
 		Aliases:             req.Aliases,
+		QuotaMode:           applyString(req.QuotaMode, policy.QuotaModePeriodic),
+		FixedLimitUSD:       applyFloat64(req.FixedLimitUSD, 0),
 		DailyLimitUSD:       applyFloat64(req.DailyLimitUSD, 0),
 		WeeklyLimitUSD:      applyFloat64(req.WeeklyLimitUSD, 0),
 		AllowModelsEndpoint: applyBool(req.AllowModelsEndpoint, false),
@@ -654,6 +719,12 @@ func (a *App) patchKey(body []byte) ManagementResponse {
 	}
 	if req.RPM != nil {
 		current.RPM = *req.RPM
+	}
+	if req.QuotaMode != nil {
+		current.QuotaMode = *req.QuotaMode
+	}
+	if req.FixedLimitUSD != nil {
+		current.FixedLimitUSD = *req.FixedLimitUSD
 	}
 	if req.DailyLimitUSD != nil {
 		current.DailyLimitUSD = *req.DailyLimitUSD
@@ -710,6 +781,13 @@ func (a *App) resetRPM(id string) ManagementResponse {
 	return jsonResponse(http.StatusOK, map[string]any{"reset": true, "id": strings.TrimSpace(id)})
 }
 
+func (a *App) resetQuota(id string) ManagementResponse {
+	if err := a.store.ResetFixedQuota(id); err != nil {
+		return storeError(err)
+	}
+	return jsonResponse(http.StatusOK, map[string]any{"reset": true, "id": strings.TrimSpace(id)})
+}
+
 // keyUsage returns the per-alias usage breakdown for one downstream key (the
 // key detail subpage data source). id is taken from the query string (or body),
 // matching the rotate/reset-rpm/delete convention.
@@ -725,6 +803,8 @@ func (a *App) keyUsage(id string) ManagementResponse {
 	return jsonResponse(http.StatusOK, map[string]any{
 		"key_id":           key.ID,
 		"key_name":         key.Name,
+		"quota_mode":       key.QuotaMode,
+		"fixed_limit_usd":  key.FixedLimitUSD,
 		"daily_limit_usd":  key.DailyLimitUSD,
 		"weekly_limit_usd": key.WeeklyLimitUSD,
 		"aliases":          aliases,
@@ -780,6 +860,8 @@ func (a *App) publicKeyFromConfig(key policy.KeyConfig) publicKey {
 		// Aliases is the canonical source.
 		Models:              append([]policy.ModelRule{}, key.Models...),
 		Aliases:             append([]policy.KeyAliasRef{}, key.Aliases...),
+		QuotaMode:           key.QuotaMode,
+		FixedLimitUSD:       key.FixedLimitUSD,
 		DailyLimitUSD:       key.DailyLimitUSD,
 		WeeklyLimitUSD:      key.WeeklyLimitUSD,
 		AllowModelsEndpoint: key.AllowModelsEndpoint,
@@ -795,6 +877,13 @@ func (a *App) publicKeyFromConfig(key policy.KeyConfig) publicKey {
 }
 
 func applyFloat64(v *float64, def float64) float64 {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+func applyString(v *string, def string) string {
 	if v == nil {
 		return def
 	}

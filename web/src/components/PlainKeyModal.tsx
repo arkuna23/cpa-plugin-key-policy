@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useT } from "../i18n";
 
 interface Props {
@@ -9,6 +10,13 @@ interface Props {
 // Shows a freshly-issued/rotated plain key once. After closing it can never be retrieved again.
 export default function PlainKeyModal({ plainKey, title, onClose }: Props) {
   const t = useT();
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(plainKey);
@@ -17,18 +25,24 @@ export default function PlainKeyModal({ plainKey, title, onClose }: Props) {
     }
   };
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{title ?? t("plainModal.defaultTitle")}</h3>
+    <dialog
+      open
+      className="modal-overlay"
+      aria-modal="true"
+      aria-labelledby="plain-key-modal-title"
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <div className="modal">
+        <h3 id="plain-key-modal-title">{title ?? t("plainModal.defaultTitle")}</h3>
         <div className="error" style={{ fontWeight: 600 }}>
           {t("plainModal.warning")}
         </div>
         <div className="keybox">{plainKey}</div>
         <div className="actions">
-          <button className="btn primary" onClick={copy}>{t("plainModal.copy")}</button>
-          <button className="btn" onClick={onClose}>{t("plainModal.saved")}</button>
+          <button type="button" className="btn primary" onClick={copy}>{t("plainModal.copy")}</button>
+          <button type="button" className="btn" onClick={onClose}>{t("plainModal.saved")}</button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

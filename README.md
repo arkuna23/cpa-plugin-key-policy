@@ -32,8 +32,15 @@ A plugin-owned secret (`cpa_…`). Authenticated only by this plugin. Holds:
 
 - allowed **models** and/or **aliases**
 - RPM
-- optional daily / weekly dollar limits
+- one of two quota modes: cumulative fixed USD quota, or periodic daily / weekly USD limits
 - optional `allow_models_endpoint` (see below)
+
+Fixed quota never resets automatically. Administrators can clear only its
+cumulative counter in the UI or with `POST …/keys/reset-quota`; daily and
+weekly statistics remain intact. Periodic quota preserves the existing UTC
+daily and 7-day-window behavior. The model price table can fill individual
+rows or overwrite every exact single-target token-price match from the LiteLLM
+community reference table.
 
 ### Alias (global mapping table)
 
@@ -97,6 +104,7 @@ Linux `.so` needs cgo and a matching toolchain:
 ```bash
 make test
 make build-linux          # builds web UI, then linux amd64/arm64 .so
+make package-linux-arm64  # official ARM64 store ZIP + checksums.txt
 # or
 make web-build
 GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
@@ -105,7 +113,15 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
 
 On Windows, build the `.so` via WSL/Linux. `go test ./...` uses a non-cgo stub so unit tests run without a shared-library toolchain.
 
-Copy the `.so` into CPA `plugins.dir` and enable the plugin in config.
+`make package-linux-arm64` produces the official release asset
+`dist/cpa-key-policy_0.5.0_linux_arm64.zip` (containing `cpa-key-policy.so` at
+the ZIP root), `dist/checksums.txt`, and a standalone `dist/cpa-key-policy.so`.
+
+CLIProxyAPI does not currently expose a local ZIP upload endpoint. Install via
+the Plugins Store after publishing the matching GitHub Release and registry
+version, or stop CPA and copy `dist/cpa-key-policy.so` to
+`<plugins.dir>/linux/arm64/cpa-key-policy.so`, enable the configuration below,
+and restart. The Linux `_no-plugin` build cannot load dynamic plugins.
 
 ---
 
@@ -170,6 +186,7 @@ Exact paths (no path templates). Auth: CPA management bearer token.
 - `GET/POST/PATCH/DELETE …/keys` (`id` in query or body for mutate)
 - `POST …/keys/rotate?id=…`
 - `POST …/keys/reset-rpm?id=…`
+- `POST …/keys/reset-quota?id=…`
 - `GET …/keys/usage?id=…`
 - `GET …/status`
 
@@ -257,4 +274,3 @@ Per-key `allow_models_endpoint`: **binary** — deny (401) or full global list. 
 go test ./...
 cd web && npm test && npm run build
 ```
-

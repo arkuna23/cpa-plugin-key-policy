@@ -283,18 +283,18 @@ function RuleCard({
     <div className="rule-card">
       <div className="rule-card-head">
         <div className="rule-card-order">
-          <button onClick={onMoveUp} disabled={idx === 0} title={t("mapping.rule.moveUp")}>↑</button>
-          <button onClick={onMoveDown} disabled={idx === total - 1} title={t("mapping.rule.moveDown")}>↓</button>
+          <button aria-label={t("mapping.rule.moveUp")} onClick={onMoveUp} disabled={idx === 0} title={t("mapping.rule.moveUp")}>↑</button>
+          <button aria-label={t("mapping.rule.moveDown")} onClick={onMoveDown} disabled={idx === total - 1} title={t("mapping.rule.moveDown")}>↓</button>
         </div>
-        <div className="rule-card-main" onClick={() => setExpanded(!expanded)} style={{ cursor: "pointer" }}>
+        <button type="button" className="rule-card-main" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
           <div className="rule-card-name">{rule.name}</div>
           <div className="rule-card-sub">{rule.field}: {rule.pattern} → {rule.group}</div>
-        </div>
+        </button>
         <div className="rule-card-right">
           <span className={"rule-match-badge" + (matchCount === 0 ? " zero" : "")}>
             {matchCount !== null
               ? (matchCount > 0 ? t("mapping.rule.matchCount", { n: matchCount }) : t("mapping.rule.matchCountZero"))
-              : "..."}
+              : "…"}
           </span>
           <label className="switch" title={t("mapping.rule.enabled")}>
             <input type="checkbox" checked={rule.enabled} readOnly />
@@ -467,9 +467,9 @@ export function AliasEditForm() {
     <div className="map-form-page">
       <div className="map-form-card">
         <div className="map-form-head">
-          <a className="back-link" onClick={() => leaveForm(true)}>
+          <button type="button" className="back-link" onClick={() => leaveForm(true)}>
             ← {t("mapping.back")}
-          </a>
+          </button>
           <h1>{isNew ? t("mapping.alias.newTitle") : t("mapping.alias.editTitle")}</h1>
         </div>
         <div className="map-form-row">
@@ -664,9 +664,9 @@ export function RuleEditForm() {
     <div className="map-form-page">
       <div className="map-form-card">
         <div className="map-form-head">
-          <a className="back-link" onClick={() => nav("/mapping", { state: { mappingTab: "classify" } })}>
+          <button type="button" className="back-link" onClick={() => nav("/mapping", { state: { mappingTab: "classify" } })}>
             ← {t("mapping.back")}
-          </a>
+          </button>
           <h1>{isNew ? t("mapping.rule.newTitle") : t("mapping.rule.editTitle")}</h1>
         </div>
         <div className="map-form-row">

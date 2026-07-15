@@ -14,6 +14,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	QuotaModePeriodic = "periodic"
+	QuotaModeFixed    = "fixed"
+	stateVersion      = 2
+)
+
 type Config struct {
 	Enabled   bool        `yaml:"enabled" json:"enabled"`
 	StateFile string      `yaml:"state_file" json:"state_file"`
@@ -49,8 +55,15 @@ type KeyConfig struct {
 	// rewrite the body). So the only per-key control we can enforce at the
 	// plugin layer is the binary choice: 401 (hide the list entirely) or
 	// allow (client sees the full global list). Default false = 401.
-	AllowModelsEndpoint bool    `yaml:"allow_models_endpoint,omitempty" json:"allow_models_endpoint,omitempty"`
-	DailyLimitUSD       float64 `yaml:"daily_limit_usd,omitempty" json:"daily_limit_usd,omitempty"`
+	AllowModelsEndpoint bool `yaml:"allow_models_endpoint,omitempty" json:"allow_models_endpoint,omitempty"`
+	// QuotaMode selects the mutually-exclusive dollar quota policy:
+	//   - periodic (default): enforce the existing daily and weekly limits.
+	//   - fixed: enforce a non-resetting cumulative FixedLimitUSD.
+	// Switching modes preserves all counters; fixed usage only accumulates while
+	// the key is in fixed mode.
+	QuotaMode     string  `yaml:"quota_mode,omitempty" json:"quota_mode,omitempty"`
+	FixedLimitUSD float64 `yaml:"fixed_limit_usd,omitempty" json:"fixed_limit_usd,omitempty"`
+	DailyLimitUSD float64 `yaml:"daily_limit_usd,omitempty" json:"daily_limit_usd,omitempty"`
 	// WeeklyLimitUSD caps the dollar usage over a rolling 7-day window. 0 = unlimited.
 	WeeklyLimitUSD float64   `yaml:"weekly_limit_usd,omitempty" json:"weekly_limit_usd,omitempty"`
 	CreatedAt      time.Time `yaml:"created_at,omitempty" json:"created_at,omitempty"`
@@ -132,9 +145,9 @@ type AliasTarget struct {
 // override the default classification.
 type ClassifyRule struct {
 	Name    string `yaml:"name" json:"name"`
-	Field   string `yaml:"field" json:"field"`   // "filename" | "provider" | "plan_type" | "tier" | custom attribute name
+	Field   string `yaml:"field" json:"field"`     // "filename" | "provider" | "plan_type" | "tier" | custom attribute name
 	Pattern string `yaml:"pattern" json:"pattern"` // regex (Go syntax)
-	Group   string `yaml:"group" json:"group"`   // target group name
+	Group   string `yaml:"group" json:"group"`     // target group name
 	Enabled bool   `yaml:"enabled" json:"enabled"`
 	// compiled is the pre-compiled regex, set by normalizeConfig for fast
 	// evaluation. Not serialized.
@@ -168,6 +181,7 @@ type KeyAliasRef struct {
 // window per alias). UsageState.UnmarshalJSON auto-migrates that shape into
 // the dual-window form (old value → Daily; Weekly zeroed).
 type UsageState struct {
+	Fixed   UsageWindow                  `json:"fixed,omitempty"`
 	Daily   UsageWindow                  `json:"daily"`
 	Weekly  UsageWindow                  `json:"weekly"`
 	ByAlias map[string]AliasUsageWindows `json:"by_alias,omitempty"`
@@ -177,6 +191,7 @@ type UsageState struct {
 // single alias under a key. Replaces the legacy single-window ByAlias map;
 // old state files are auto-migrated on load (see UsageState.UnmarshalJSON).
 type AliasUsageWindows struct {
+	Fixed  UsageWindow `json:"fixed,omitempty"`
 	Daily  UsageWindow `json:"daily"`
 	Weekly UsageWindow `json:"weekly"`
 }
@@ -189,6 +204,7 @@ type AliasUsageWindows struct {
 // skipped rather than failing the whole load.
 func (s *UsageState) UnmarshalJSON(raw []byte) error {
 	var p struct {
+		Fixed   UsageWindow     `json:"fixed"`
 		Daily   UsageWindow     `json:"daily"`
 		Weekly  UsageWindow     `json:"weekly"`
 		ByAlias json.RawMessage `json:"by_alias,omitempty"`
@@ -196,6 +212,7 @@ func (s *UsageState) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
 	}
+	s.Fixed = p.Fixed
 	s.Daily = p.Daily
 	s.Weekly = p.Weekly
 	s.ByAlias = make(map[string]AliasUsageWindows)
@@ -210,7 +227,7 @@ func (s *UsageState) UnmarshalJSON(raw []byte) error {
 		if len(rawEntry) == 0 || string(rawEntry) == "null" {
 			continue
 		}
-		if hasJSONKey(rawEntry, "daily") || hasJSONKey(rawEntry, "weekly") {
+		if hasJSONKey(rawEntry, "fixed") || hasJSONKey(rawEntry, "daily") || hasJSONKey(rawEntry, "weekly") {
 			var w AliasUsageWindows
 			if err := json.Unmarshal(rawEntry, &w); err == nil {
 				s.ByAlias[alias] = w
@@ -277,7 +294,7 @@ type State struct {
 	// references survive restarts even when config.yaml is not re-read. On
 	// Configure, the config.yaml Aliases take precedence; state Aliases are a
 	// fallback for the state-only reload path (e.g. FlushUsage recovery).
-	Aliases      []AliasMapping `json:"aliases,omitempty"`
+	Aliases       []AliasMapping `json:"aliases,omitempty"`
 	ClassifyRules []ClassifyRule `json:"classify_rules,omitempty"`
 }
 
@@ -330,11 +347,11 @@ func migrateModelsToAliases(cfg *Config) {
 		key := &cfg.Keys[i]
 		if len(key.Models) == 0 {
 			// No Models to migrate. Leave existing Aliases intact — this is the
-		// normal reload path where Models is a derived field (stripped from
-		// disk by SaveState and repopulated in memory by Configure). Only the
-		// PATCH path sends non-nil Models, and an explicit clear sends Models
-		// as an empty non-nil slice which still falls through to the
-		// reconciliation below and correctly drops all alias refs.
+			// normal reload path where Models is a derived field (stripped from
+			// disk by SaveState and repopulated in memory by Configure). Only the
+			// PATCH path sends non-nil Models, and an explicit clear sends Models
+			// as an empty non-nil slice which still falls through to the
+			// reconciliation below and correctly drops all alias refs.
 			continue
 		}
 		// Build the set of alias names present in this key's Models — this is
@@ -375,10 +392,10 @@ func migrateModelsToAliases(cfg *Config) {
 				// Create a new global alias with this target.
 				ai = len(cfg.Aliases)
 				cfg.Aliases = append(cfg.Aliases, AliasMapping{
-					Alias:       m.Alias,
-					Targets:     []AliasTarget{target},
-					Dispatch:    "round-robin",
-					BillingMode: m.BillingMode,
+					Alias:                    m.Alias,
+					Targets:                  []AliasTarget{target},
+					Dispatch:                 "round-robin",
+					BillingMode:              m.BillingMode,
 					InputPricePerMillion:     m.InputPricePerMillion,
 					OutputPricePerMillion:    m.OutputPricePerMillion,
 					CacheReadPricePerMillion: m.CacheReadPricePerMillion,
@@ -447,6 +464,17 @@ func normalizeConfig(cfg *Config) error {
 		}
 		if key.RPM < 0 {
 			return fmt.Errorf("key %q rpm cannot be negative", key.ID)
+		}
+		switch strings.ToLower(strings.TrimSpace(key.QuotaMode)) {
+		case "", QuotaModePeriodic:
+			key.QuotaMode = QuotaModePeriodic
+		case QuotaModeFixed:
+			key.QuotaMode = QuotaModeFixed
+		default:
+			return fmt.Errorf("key %q quota_mode %q must be %q or %q", key.ID, key.QuotaMode, QuotaModePeriodic, QuotaModeFixed)
+		}
+		if key.FixedLimitUSD < 0 {
+			return fmt.Errorf("key %q fixed_limit_usd cannot be negative", key.ID)
 		}
 		if key.DailyLimitUSD < 0 {
 			return fmt.Errorf("key %q daily_limit_usd cannot be negative", key.ID)
@@ -675,7 +703,7 @@ func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState, alia
 		cleanKeys[i] = keys[i]
 		cleanKeys[i].Models = nil
 	}
-	state := State{Version: 1, Keys: cleanKeys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
+	state := State{Version: stateVersion, Keys: cleanKeys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -714,7 +742,7 @@ func SaveUsageOnly(path string, usage map[string]*UsageState) error {
 	for i := range keys {
 		keys[i].Models = nil
 	}
-	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
+	state := State{Version: stateVersion, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC(), Aliases: aliases, ClassifyRules: rules}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
